@@ -1,0 +1,5 @@
+# Minimal Supabase CLI config (supabase link --project-ref <ref> fills the rest)
+project_id = "muneemx"
+
+[functions.ai-scan]
+verify_jwt = true

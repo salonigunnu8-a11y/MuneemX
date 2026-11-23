@@ -1,0 +1,8 @@
+{
+  "appId": "app.muneemx.pos",
+  "appName": "MuneemX",
+  "webDir": "web",
+  "backgroundColor": "#101217",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "automatic" }
+}

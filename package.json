@@ -1,0 +1,21 @@
+{
+  "name": "muneemx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MuneemX — white-label liquor retail OS (web, Android, iOS)",
+  "scripts": {
+    "dev": "npx --yes serve web -l 5173",
+    "build": "node scripts/write-config.mjs",
+    "cap:sync": "npx cap sync",
+    "android": "npx cap add android && npx cap sync android && npx cap open android",
+    "ios": "npx cap add ios && npx cap sync ios && npx cap open ios"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  }
+}
