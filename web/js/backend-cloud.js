@@ -53,7 +53,7 @@ const CloudAPI = (() => {
 
   async function loadWorkspace(tid) {
     const c = client(), from = sod(Date.now()) - LOAD_DAYS * DAY, fromIso = new Date(from).toISOString(), m0 = new Date(Math.min(from, monthStart())).toISOString();
-    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud] = await Promise.all([
+    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud, bcs] = await Promise.all([
       c.from('tenants').select('*').eq('id', tid).single().then(ok),
       c.from('shops').select('*').eq('tenant_id', tid).order('created_at').then(ok),
       c.from('members').select('*').eq('tenant_id', tid).order('joined_at').then(ok),
@@ -66,7 +66,8 @@ const CloudAPI = (() => {
       c.from('advances').select('*').eq('tenant_id', tid).gte('ts', m0).then(ok).catch(() => []),
       c.from('payroll').select('*').eq('tenant_id', tid).then(ok).catch(() => []),
       c.from('day_closings').select('*').eq('tenant_id', tid).gte('day', fromIso.slice(0, 10)).then(ok).catch(() => []),
-      c.from('audit_log').select('*').eq('tenant_id', tid).order('ts', { ascending: false }).limit(300).then(ok).catch(() => [])]);
+      c.from('audit_log').select('*').eq('tenant_id', tid).order('ts', { ascending: false }).limit(300).then(ok).catch(() => []),
+      all(() => c.from('product_barcodes').select('barcode,product_id').eq('tenant_id', tid)).catch(() => [])]);
     const keepMe = S && S.me;
     S = emptyState(); S.me = keepMe; S.loadedFrom = from;
     S.tenants = [mTenant(tn)]; S.shops = shops.map(mShop); S.users = members.map(mMember); S.products = products.map(mProduct);
@@ -76,6 +77,7 @@ const CloudAPI = (() => {
     S.payroll = pay.map(p => ({ id: p.id, userId: p.member_id, month: p.month, net: +p.net, ts: ms(p.ts), by: p.approved_by }));
     S.closings = closes.map(x => ({ shopId: x.shop_id, date: x.day, expected: +x.expected, counted: +x.counted, variance: +x.variance, ts: ms(x.ts), by: x.member_id }));
     S.audit = aud.map(a => ({ ts: ms(a.ts), by: a.member_id, t: a.tenant_id, a: a.action, d: a.detail }));
+    S.barcodes = {}; bcs.forEach(b => S.barcodes[b.barcode] = b.product_id);
     if (S.me && S.me.tenantId === tid) S.me = S.users.find(u => u.id === S.me.id) || S.me;
     startRealtime(tid);
   }
@@ -230,6 +232,11 @@ const CloudAPI = (() => {
       S.users.push({ id, tenantId: SES.tenantId, userId: data.user.id, name: f.name, username: f.username, role: f.role, shopId: f.shopId, phone: f.phone, salary: f.salary, commission: f.commission, joined: Date.now(), active: true });
     },
     async audit(a, d) { await client().rpc('log_audit', { p_action: a, p_detail: d }); },
+    async linkBarcode(pid, code, approverId, token) {
+      ok(await client().rpc('link_barcode', { p_product: pid, p_barcode: code, p_approver: approverId || null, p_pin: token || null }));
+      (S.barcodes = S.barcodes || {})[code] = pid;
+    },
+    async unlinkBarcode(code) { ok(await client().rpc('unlink_barcode', { p_barcode: code })); delete S.barcodes[code]; },
     async adminOverview() {
       const rows = ok(await client().rpc('admin_overview', { p_since: new Date(sod(Date.now())).toISOString() }));
       return rows.map(r => ({ id: r.id, slug: r.slug, name: r.name, type: r.type, plan: r.plan, city: r.city, color: r.color, logo: r.logo, status: r.status, shops: r.shops, users: r.users, today: +r.sales_today, bills: r.bills_today, week: +r.sales_7d }));

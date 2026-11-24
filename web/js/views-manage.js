@@ -7,7 +7,7 @@
 const INV = {};
 VIEWS.inventory = function () {
   SUB.tab = SUB.tab || 'stock';
-  const tabs = [['stock', 'Stock'], ['inward', 'Stock inward'], ...(tShops().length > 1 && role() === 'owner' ? [['transfer', 'Transfer']] : []), ['count', 'Physical count'], ['register', 'Daily register'], ['catalog', 'Product catalog']];
+  const tabs = [['stock', 'Stock'], ['inward', 'Stock inward'], ...(tShops().length > 1 && role() === 'owner' ? [['transfer', 'Transfer']] : []), ['count', 'Physical count'], ['register', 'Daily register'], ['links', 'Link barcodes'], ['catalog', 'Product catalog']];
   $('#view').innerHTML = `<div class="tabs">${tabs.map(([k, t]) => `<a data-t="${k}" class="${SUB.tab === k ? 'on' : ''}">${t}</a>`).join('')}</div><div id="inv"></div>`;
   $$('[data-t]').forEach(a => a.onclick = () => { SUB = { tab: a.dataset.t }; VIEWS.inventory(); });
   INV[SUB.tab]();
@@ -27,9 +27,12 @@ INV.stock = function () {
   $('#icsv').onclick = () => copyText(['Product,Pack,Size ml,Barcode,MRP,' + ids.map(id => shopById(id).name).join(',') + ',Total', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.p.barcode},${r.p.mrp},${r.per.join(',')},${r.q}`)].join('\n'));
 };
 function productPicker(sel, onPick) {
-  const el = $(sel); el.innerHTML = `<input placeholder="Scan barcode or search product" class="pp-in"><div class="pp-res"></div>`;
+  const el = $(sel); el.innerHTML = `<div class="row"><input placeholder="Scan barcode or search product" class="pp-in"><button class="btn" type="button" data-ppcam>${ic('cam')}</button></div><div class="pp-res"></div>`;
   const inp = el.querySelector('.pp-in'), res = el.querySelector('.pp-res');
-  inp.onkeydown = e => { if (e.key === 'Enter') { const p = visibleProducts().find(p => p.barcode === inp.value.trim()); if (p) { onPick(p); beep(true); } else { beep(false); toast('Barcode not in catalog', 'bad'); } } };
+  const byCode = code => { code = normCode(code); const p = findByBarcode(code); if (p) { onPick(p); beep(true); } else { beep(false); linkBarcodeModal(code, onPick); } };
+  SCAN_HANDLER = byCode;
+  el.querySelector('[data-ppcam]').onclick = () => openCamera(byCode);
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) { e.preventDefault(); const v = inp.value; inp.value = ''; res.innerHTML = ''; byCode(v); } };
   inp.oninput = () => {
     const q = inp.value.toLowerCase().trim(); if (q.length < 2 || /^\d+$/.test(q)) { res.innerHTML = ''; return; } const w = q.split(/\s+/);
     const r = visibleProducts().filter(p => w.every(x => (pname(p) + ' ' + p.pack + ' ' + p.sizeMl).toLowerCase().includes(x))).slice(0, 6);
@@ -102,9 +105,30 @@ INV.register = function () {
   $('#inv').innerHTML = `<div class="card"><h3>Daily stock register<span class="sp"></span><span class="small mute">Opening + received − sold = closing, per product</span></h3>
   <div class="row wrap" style="margin-bottom:12px"><input type="date" id="rd" value="${SUB.date}" style="width:auto">${role() === 'owner' ? `<select id="rsh" style="width:auto">${tShops().map(s => `<option value="${s.id}" ${s.id === sh ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}<span class="sp"></span><button class="btn" id="rcsv">${ic('copy')} Copy CSV</button></div>
   <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th class="r">Opening</th><th class="r">Received</th><th class="r">Sold</th><th class="r">Closing</th><th class="r">Sales ₹</th></tr>${rows.map(r => `<tr><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td class="r">${r.open}</td><td class="r">${r.inw || ''}</td><td class="r b">${r.sold || ''}</td><td class="r">${r.close}</td><td class="r">${r.sold ? inr(r.sold * r.p.mrp) : ''}</td></tr>`).join('')}
-  <tr style="background:#fafbfc"><td class="b">Total</td><td></td><td class="r b">${sum(rows, r => r.open)}</td><td class="r b">${sum(rows, r => r.inw)}</td><td class="r b">${sum(rows, r => r.sold)}</td><td class="r b">${sum(rows, r => r.close)}</td><td class="r b">${inr(sum(rows, r => r.sold * r.p.mrp))}</td></tr></table></div></div>`;
+  <tr style="background:var(--soft)"><td class="b">Total</td><td></td><td class="r b">${sum(rows, r => r.open)}</td><td class="r b">${sum(rows, r => r.inw)}</td><td class="r b">${sum(rows, r => r.sold)}</td><td class="r b">${sum(rows, r => r.close)}</td><td class="r b">${inr(sum(rows, r => r.sold * r.p.mrp))}</td></tr></table></div></div>`;
   $('#rd').onchange = e => { SUB.date = e.target.value; SUB.shop = sh; INV.register(); }; if ($('#rsh')) $('#rsh').onchange = e => { SUB.shop = e.target.value; INV.register(); };
   $('#rcsv').onclick = () => copyText(['Product,Pack,Size,Opening,Received,Sold,Closing', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.open},${r.inw},${r.sold},${r.close}`)].join('\n'));
+};
+INV.links = function () {
+  const rows = Object.entries(S.barcodes || {}).map(([code, pid]) => ({ code, p: prodById(pid) })).filter(r => r.p).sort((a, b) => pname(a.p).localeCompare(pname(b.p)));
+  $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>${ic('scan', 16)} Teach your real barcodes</h3>
+   <p class="mute small" style="margin-top:0">Bottles from your depot carry the manufacturer's barcode. Scan each new bottle once here and pick its product. After that, Scan & Sell bills it instantly at every shop.</p>
+   <div class="row"><input id="lkin" placeholder="Scan or type barcode ⏎" class="mono" autocomplete="off" inputmode="numeric"><button class="btn p" id="lkcam">${ic('cam')} Camera</button></div>
+   <div id="lkmsg"></div></div>
+   <div class="card"><h3>Linked barcodes<span class="sp"></span><span class="small mute">${rows.length}</span></h3>
+   <div class="tbl"><table><tr><th>Barcode</th><th>Product</th><th>Pack</th><th></th></tr>${rows.map(r => `<tr><td class="mono small">${esc(r.code)}</td><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td class="r"><button class="btn sm d" data-unl="${esc(r.code)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">No linked barcodes yet — scan a bottle to start</td></tr>'}</table></div></div></div>`;
+  const msg = (h, k) => { const m = $('#lkmsg'); if (m) m.innerHTML = `<div class="flash ${k}">${h}</div>`; };
+  const handle = code => {
+    code = normCode(code); if (!code) return;
+    const p = findByBarcode(code);
+    if (p) { beep(true); msg(`<span class="mono">${esc(code)}</span> → <b>${esc(pname(p))} ${ppack(p)}</b> <button class="btn sm" id="relink" style="margin-left:6px">Change</button>`, 'ok'); const b = $('#relink'); if (b) b.onclick = () => linkBarcodeModal(code, () => INV.links()); return; }
+    beep(false); linkBarcodeModal(code, () => { INV.links(); const i = $('#lkin'); if (i) i.focus(); });
+  };
+  SCAN_HANDLER = handle;
+  const inp = $('#lkin'); inp.focus();
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) { e.preventDefault(); const v = inp.value; inp.value = ''; handle(v); } };
+  $('#lkcam').onclick = () => openCamera(handle, { continuous: false });
+  $$('[data-unl]').forEach(b => b.onclick = async () => { const ok = await run(async () => { await API.unlinkBarcode(b.dataset.unl); return true; }, b); if (ok) INV.links(); });
 };
 INV.catalog = function () {
   const F = SUB.f || (SUB.f = { brand: '', name: '', category: 'Whisky', pack: 'Quarter', sizeMl: 180, mrp: '', cost: '', barcode: '' });
@@ -162,7 +186,7 @@ VIEWS.expenses = function () {
   };
   if (window.Chart) {
     const brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim(); const e = Object.entries(bc).sort((a, b) => b[1] - a[1]);
-    charts.push(new Chart($('#chX'), { type: 'bar', data: { labels: e.map(x => x[0]), datasets: [{ data: e.map(x => x[1]), backgroundColor: brand, borderRadius: 4 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } }, scales: { x: { ticks: { callback: v => inrK(v) }, grid: { color: '#eef0f3' } }, y: { grid: { display: false } } } } }));
+    charts.push(new Chart($('#chX'), { type: 'bar', data: { labels: e.map(x => t(x[0])), datasets: [{ data: e.map(x => x[1]), backgroundColor: brand, borderRadius: 4 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } }, scales: { x: { ticks: { callback: v => inrK(v) }, grid: { color: cssVar('--grid') } }, y: { grid: { display: false } } } } }));
   }
 };
 
@@ -281,7 +305,7 @@ REP.brands = function () {
   const ids = scope(), t0 = sod(Date.now()) - 6 * DAY; const ls = liveSales(ids, t0); const m = {};
   ls.forEach(s => s.items.forEach(i => { const p = prodById(i.pid); if (!p) return; const k = p.brand; m[k] = m[k] || { q: 0, r: 0, g: 0, cat: p.category, packs: {} }; m[k].q += i.qty; m[k].r += i.qty * i.price; m[k].g += i.qty * (i.price - i.cost); m[k].packs[p.pack] = (m[k].packs[p.pack] || 0) + i.qty; }));
   const rows = Object.entries(m).sort((a, b) => b[1].r - a[1].r); const tot = sum(rows, r => r[1].r) || 1;
-  $('#rep').innerHTML = `<div class="card"><h3>Brand performance — last 7 days</h3><div class="tbl"><table><tr><th>Brand</th><th>Category</th><th>Pack mix</th><th class="r">Units</th><th class="r">Sales</th><th class="r">Share</th><th class="r">Margin</th></tr>${rows.map(([b, v]) => `<tr><td class="b">${esc(b)}</td><td class="small">${v.cat}</td><td class="small">${Object.entries(v.packs).map(([k, q]) => `${k} ${q}`).join(' · ')}</td><td class="r">${v.q}</td><td class="r b">${inrK(v.r)}</td><td class="r"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div style="width:60px;height:6px;background:#eef0f3;border-radius:3px"><div style="width:${(v.r / tot * 100).toFixed(1)}%;height:100%;background:var(--brand);border-radius:3px"></div></div>${(v.r / tot * 100).toFixed(1)}%</div></td><td class="r">${inrK(v.g)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No sales yet</td></tr>'}</table></div></div>`;
+  $('#rep').innerHTML = `<div class="card"><h3>Brand performance — last 7 days</h3><div class="tbl"><table><tr><th>Brand</th><th>Category</th><th>Pack mix</th><th class="r">Units</th><th class="r">Sales</th><th class="r">Share</th><th class="r">Margin</th></tr>${rows.map(([b, v]) => `<tr><td class="b">${esc(b)}</td><td class="small">${v.cat}</td><td class="small">${Object.entries(v.packs).map(([k, q]) => `${k} ${q}`).join(' · ')}</td><td class="r">${v.q}</td><td class="r b">${inrK(v.r)}</td><td class="r"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div style="width:60px;height:6px;background:var(--chip);border-radius:3px"><div style="width:${(v.r / tot * 100).toFixed(1)}%;height:100%;background:var(--brand);border-radius:3px"></div></div>${(v.r / tot * 100).toFixed(1)}%</div></td><td class="r">${inrK(v.g)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No sales yet</td></tr>'}</table></div></div>`;
 };
 REP.audit = function () {
   const a = S.audit.filter(x => x.t === SES.tenantId).sort((x, y) => y.ts - x.ts);

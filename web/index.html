@@ -6,11 +6,12 @@
 <meta name="theme-color" content="#6d28d9">
 <meta name="description" content="MuneemX — white-label liquor retail OS: scan-locked billing, live sales, stock, expenses and staff salary.">
 <title>MuneemX — Liquor Retail OS</title>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("mx_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}catch(e){}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -23,7 +24,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <!-- MuneemX (order matters) -->
 <script src="js/config.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/core.js"></script>
+<script src="js/scanner.js"></script>
 <script src="js/backend-demo.js"></script>
 <script src="js/backend-cloud.js"></script>
 <script src="js/views-sell.js"></script>

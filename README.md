@@ -117,7 +117,15 @@ After any change in `web/`, run `npx cap sync`. Suggested native upgrades for v2
 - a Bluetooth ESC/POS printer plugin for 3-inch receipts;
 - `@capacitor/preferences` to remember the counter's workspace.
 
-## 8. How security works
+## 8. Scanning, language and theme
+
+- **USB / Bluetooth scanners** act like a keyboard. On Scan & Sell they work anywhere on the screen, even if the scan box lost focus.
+- **Camera**: the **Camera** button on Scan & Sell, Stock inward, Transfer and Link barcodes scans live with a phone or webcam. It uses the browser's built-in barcode reader (Chrome / Android), falling back to ZXing on other browsers such as iPhone Safari. The site must be opened over https, which Netlify does.
+- **Real bottle barcodes**: the master catalog ships with sample barcodes. The first time a real bottle is scanned, tap **Link to a product**, or use **Inventory → Link barcodes** to teach a whole carton quickly. Salesmen need a manager PIN to link. Links are per workspace (table `product_barcodes`).
+- **English / हिन्दी**: the **हिं / EN** button in the top bar and on the sign-in page. Translations live in `web/js/i18n.js` (`HI` dictionary + `HI_RX` patterns). Add a line there to translate new text. Product names, shop data and numbers stay as entered.
+- **Light / dark**: the sun/moon button. It follows the phone's setting until changed, and the choice is remembered per device.
+
+## 9. How security works
 
 - **Data isolation:** every table has row-level security. A client can only read its own workspace. A salesman sees only his own bills, and a manager only his own shop.
 - **Protected operations:** bills, voids, stock changes, transfers, counts and salary run only through database functions. These check the role, the shop, stock, MRP, scan-lock policy and the manager's approval PIN on the server, so the browser can't bypass them.
@@ -125,7 +133,7 @@ After any change in `web/`, run `npx cap sync`. Suggested native upgrades for v2
 - **Tamper-evident bills:** each bill's SHA-256 lock code chains to the previous bill. **Bills → Verify ledger** recomputes the chain on the server.
 - **Owner limits:** owners can rebrand, but only the platform admin can change a client's plan, status or workspace code.
 
-## 9. Known limits of v0.1
+## 10. Known limits of v0.1
 
 - Platform admin's **Open workspace** is read-only in cloud mode. Writes require being a member.
 - The dashboard loads the last 40 days. Older bills load on demand when you pick an older date.

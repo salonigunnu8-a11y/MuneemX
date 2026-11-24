@@ -30,7 +30,7 @@ function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let 
 function demoSeed() {
   const R = mulberry(20261123), ri = (a, b) => Math.floor(R() * (b - a + 1)) + a, pick = a => a[Math.floor(R() * a.length)];
   const now = Date.now(), today = sod(now);
-  const st = { v: 3, seededAt: now, products: [], tenants: [], shops: [], users: [], stock: {}, sales: [], moves: [], expenses: [], attendance: {}, advances: [], payroll: [], closings: [], audit: [], sim: true };
+  const st = { v: 3, seededAt: now, barcodes: {}, products: [], tenants: [], shops: [], users: [], stock: {}, sales: [], moves: [], expenses: [], attendance: {}, advances: [], payroll: [], closings: [], audit: [], sim: true };
   let n = 1;
   for (const [brand, name, cat, mrp, pop] of SPIRITS) {
     [['Full', 750, mrp, .6], ['Half', 375, Math.round(mrp / 20) * 10 + 10, 1.2], ['Quarter', 180, Math.round(mrp / 40) * 10 + 10, 3]].forEach(([pack, ml, p, w]) => {
@@ -139,7 +139,7 @@ const DemoAPI = (() => {
     async init() {
       DB = lsGet(DEMO_KEY, null);
       if (!DB || DB.v !== 3 || Date.now() - DB.seededAt > 3 * DAY) { DB = demoSeed(); save(); }
-      S = DB; S.me = null;
+      DB.barcodes = DB.barcodes || {}; S = DB; S.me = null;
       const ses = loadSes();
       if (ses && DB.users.find(u => u.id === ses.userId)) { SES = ses; S.me = DB.users.find(u => u.id === ses.userId); return true; }
       return false;
@@ -228,6 +228,12 @@ const DemoAPI = (() => {
       DB.users.push(u); DB.attendance[u.id] = {}; log('Staff added', `${u.name} (${u.role})`); save();
     },
     async audit(a, d) { log(a, d); save(); },
+    async linkBarcode(pid, code, approverId, pin) {
+      if (role() === 'salesman' && !pinOk(approverId, pin, S.me.shopId)) throw new Error('Manager approval needed');
+      const owner = visibleProducts().find(p => p.barcode === code && p.id !== pid); if (owner) throw new Error('This barcode already belongs to another product');
+      (DB.barcodes = DB.barcodes || {})[code] = pid; const p = prodById(pid); log('Barcode linked', `${code} → ${pname(p)} ${p.pack}`); save();
+    },
+    async unlinkBarcode(code) { delete DB.barcodes[code]; log('Barcode unlinked', code); save(); },
     async adminOverview() {
       const t0 = sod(Date.now());
       return DB.tenants.map(t => { const ids = DB.shops.filter(s => s.tenantId === t.id).map(s => s.id); return { ...t, shops: ids.length, users: DB.users.filter(u => u.tenantId === t.id).length, today: sum(liveSales(ids, t0), s => s.total), bills: liveSales(ids, t0).length, week: sum(liveSales(ids, t0 - 6 * DAY), s => s.total) }; });

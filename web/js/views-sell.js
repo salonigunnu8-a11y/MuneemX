@@ -48,18 +48,18 @@ VIEWS.dashboard = function () {
   </div>`;
   $('#goinv').onclick = () => go('inventory');
   if (!window.Chart) return;
-  Chart.defaults.font.family = "'Plus Jakarta Sans',system-ui,sans-serif"; Chart.defaults.color = '#6b7280'; Chart.defaults.animation = false;
+  Chart.defaults.font.family = "'Plus Jakarta Sans',system-ui,sans-serif"; Chart.defaults.color = cssVar('--mute'); Chart.defaults.animation = false;
   const brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim();
   const H = [...Array(15)].map((_, i) => i + 9);
   const hb = arr => H.map(h => sum(arr.filter(s => new Date(s.ts).getHours() === h), s => s.total));
   const yfull = liveSales(ids, y0, t0);
-  charts.push(new Chart($('#chH'), { type: 'bar', data: { labels: H.map(h => pad(h) + ':00'), datasets: [{ label: 'Today', data: hb(td), backgroundColor: brand, borderRadius: 4, order: 2 }, { label: 'Yesterday', data: hb(yfull), type: 'line', borderColor: '#9aa1ad', borderDash: [4, 4], pointRadius: 0, tension: .3, order: 1 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + inr(c.raw) } } }, scales: { y: { ticks: { callback: v => inrK(v) }, grid: { color: '#eef0f3' } }, x: { grid: { display: false } } } } }));
+  charts.push(new Chart($('#chH'), { type: 'bar', data: { labels: H.map(h => pad(h) + ':00'), datasets: [{ label: t('Today'), data: hb(td), backgroundColor: brand, borderRadius: 4, order: 2 }, { label: t('Yesterday'), data: hb(yfull), type: 'line', borderColor: '#9aa1ad', borderDash: [4, 4], pointRadius: 0, tension: .3, order: 1 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + inr(c.raw) } } }, scales: { y: { ticks: { callback: v => inrK(v) }, grid: { color: cssVar('--grid') } }, x: { grid: { display: false } } } } }));
   const M = [...Array(60)].map((_, i) => now - (59 - i) * 6e4); const mm = M.map(t => sum(td.filter(s => s.ts > t - 6e4 && s.ts <= t), s => s.total));
-  charts.push(new Chart($('#chM'), { type: 'bar', data: { labels: M.map(tm), datasets: [{ data: mm, backgroundColor: M.map((_, i) => i === 59 ? brand : brand + '99'), borderRadius: 2, barPercentage: 1, categoryPercentage: .85 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } }, scales: { y: { ticks: { callback: v => inrK(v) }, grid: { color: '#eef0f3' } }, x: { ticks: { maxTicksLimit: 6 }, grid: { display: false } } } } }));
+  charts.push(new Chart($('#chM'), { type: 'bar', data: { labels: M.map(tm), datasets: [{ data: mm, backgroundColor: M.map((_, i) => i === 59 ? brand : brand + '99'), borderRadius: 2, barPercentage: 1, categoryPercentage: .85 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } }, scales: { y: { ticks: { callback: v => inrK(v) }, grid: { color: cssVar('--grid') } }, x: { ticks: { maxTicksLimit: 6 }, grid: { display: false } } } } }));
   const pk = Object.entries(packs).sort((a, b) => b[1] - a[1]);
-  charts.push(new Chart($('#chP'), { type: 'bar', data: { labels: pk.map(x => x[0]), datasets: [{ data: pk.map(x => x[1]), backgroundColor: brand, borderRadius: 4 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#eef0f3' } }, y: { grid: { display: false } } } } }));
+  charts.push(new Chart($('#chP'), { type: 'bar', data: { labels: pk.map(x => t(x[0])), datasets: [{ data: pk.map(x => x[1]), backgroundColor: brand, borderRadius: 4 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: cssVar('--grid') } }, y: { grid: { display: false } } } } }));
   const D = [...Array(7)].map((_, i) => t0 - (6 - i) * DAY);
-  charts.push(new Chart($('#chD'), { type: 'bar', data: { labels: D.map(d => new Date(d).toLocaleDateString('en-IN', { weekday: 'short' })), datasets: [{ label: 'Cash', data: D.map(d => sum(liveSales(ids, d, d + DAY), s => s.cash)), backgroundColor: '#9aa1ad', borderRadius: 3 }, { label: 'UPI', data: D.map(d => sum(liveSales(ids, d, d + DAY), s => s.upi)), backgroundColor: brand, borderRadius: 3 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + inr(c.raw) } } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: v => inrK(v) }, grid: { color: '#eef0f3' } } } } }));
+  charts.push(new Chart($('#chD'), { type: 'bar', data: { labels: D.map(d => new Date(d).toLocaleDateString('en-IN', { weekday: 'short' })), datasets: [{ label: t('Cash'), data: D.map(d => sum(liveSales(ids, d, d + DAY), s => s.cash)), backgroundColor: '#9aa1ad', borderRadius: 3 }, { label: t('UPI'), data: D.map(d => sum(liveSales(ids, d, d + DAY), s => s.upi)), backgroundColor: brand, borderRadius: 3 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + inr(c.raw) } } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: v => inrK(v) }, grid: { color: cssVar('--grid') } } } } }));
 };
 
 /* ---------- SCAN & SELL ---------- */
@@ -73,11 +73,11 @@ VIEWS.pos = function () {
   <div class="grid">
    <div class="card">
     <h3>${ic('scan', 18)} Scan product<span class="sp"></span>${P.requireScan ? `<span class="badge ok">${ic('lock', 12)} Scan-lock on</span>` : '<span class="badge warn">Scan-lock off</span>'}</h3>
-    <div class="scan"><input id="scanin" placeholder="Scan or type barcode ⏎" autocomplete="off" inputmode="numeric"><button class="btn" id="camb" title="Photo of barcode">${ic('cam')} Photo</button><button class="btn p" id="aib">${ic('spark')} AI scan</button></div>
+    <div class="scan"><input id="scanin" placeholder="Scan or type barcode ⏎" autocomplete="off" inputmode="numeric"><button class="btn p" id="camlive" title="Live camera scanner">${ic('cam')} Camera</button><button class="btn" id="camb" title="Photo of barcode">Photo</button><button class="btn" id="aib">${ic('spark')} AI scan</button></div>
     <div id="flash"></div>
-    <div class="small mute" style="margin-top:8px">USB / Bluetooth barcode scanners type straight into this box. <b>Photo</b> reads a barcode from a picture. <b>AI scan</b> reads the bottle label and matches it to your database.</div>
+    <div class="small mute" style="margin-top:8px">USB / Bluetooth scanners work anywhere on this screen. <b>Camera</b> scans live with the phone or webcam. A new bottle barcode is linked to its product once, then it bills every time.</div>
    </div>
-   <div class="card"><h3>Quick scan<span class="sp"></span><span class="small mute">${API.mode === 'demo' ? 'Tap a barcode to simulate a scan' : 'Top sellers — tap to add as scanned'}</span></h3>
+   <div class="card"><h3>Quick scan<span class="sp"></span><span class="small mute">${API.mode === 'demo' ? 'Tap a barcode to simulate a scan' : 'Top sellers — tap to add'}</span></h3>
     <div class="bars">${popular.map(p => `<button class="bc" data-bc="${p.barcode}"><div class="nm">${esc(p.brand)} · ${p.pack}</div>${barSvg(p.barcode)}<div class="cd">${p.barcode}</div></button>`).join('')}${API.mode === 'demo' ? `<button class="bc" data-bc="8901234567890"><div class="nm" style="color:var(--bad)">Unknown product</div>${barSvg('8901234567890')}<div class="cd">8901234567890</div></button>` : ''}</div>
    </div>
    <div class="card"><h3>${ic('search', 16)} Find without scanning<span class="sp"></span>${P.requireScan && P.override ? '<span class="small mute">Needs manager PIN</span>' : ''}</h3>
@@ -89,7 +89,9 @@ VIEWS.pos = function () {
    <div class="small mute" style="margin-top:12px;display:flex;justify-content:space-between"><span>My bills today: <b>${mine.length}</b></span><span>My sales: <b>${inr(sum(mine, s => s.total))}</b></span></div>
   </div></div>`;
   const si = $('#scanin'); si.focus();
-  si.onkeydown = e => { if (e.key === 'Enter') { posScan(si.value); si.value = ''; } };
+  si.onkeydown = e => { if (e.key === 'Enter' || (e.key === 'Tab' && si.value.trim())) { e.preventDefault(); posScan(si.value); si.value = ''; } };
+  SCAN_HANDLER = code => posScan(code);
+  $('#camlive').onclick = () => openCamera(code => posScan(code));
   $$('[data-bc]').forEach(b => b.onclick = () => { posScan(b.dataset.bc); si.focus(); });
   $('#camb').onclick = () => fileInput(async f => { flash('Reading barcode from photo…', 'info'); const code = await decodeBarcode(f); if (code) posScan(code); else flash('No barcode found in the photo. Try a sharper, closer shot — or use AI scan.', 'bad'); });
   $('#aib').onclick = () => fileInput(async f => {
@@ -117,9 +119,14 @@ VIEWS.pos = function () {
 };
 function flash(html, k) { const f = $('#flash'); if (f) f.innerHTML = `<div class="flash ${k}">${html}</div>`; }
 function posScan(code) {
-  code = String(code).trim(); if (!code) return;
-  const p = visibleProducts().find(p => p.barcode === code);
-  if (!p) { beep(false); flash(`${ic('lock', 14)} Sale locked — barcode <span class="mono">${esc(code)}</span> is not in your product database. Ask the manager to enroll it.`, 'bad'); API.audit('Unknown barcode scanned', code).catch(() => { }); return; }
+  code = normCode(code); if (!code) return;
+  const p = findByBarcode(code);
+  if (!p) {
+    beep(false);
+    flash(`${ic('lock', 14)} Sale locked — barcode <span class="mono">${esc(code)}</span> is not in your product database. <button class="btn sm" id="linkit" style="margin-left:6px">Link to a product</button>`, 'bad');
+    const b = $('#linkit'); if (b) b.onclick = () => linkBarcodeModal(code, p => { addToCart(p, 'scan'); const si = $('#scanin'); if (si) si.focus(); });
+    API.audit('Unknown barcode scanned', code).catch(() => { }); return;
+  }
   addToCart(p, 'scan');
 }
 function addToCart(p, m) {
@@ -141,7 +148,7 @@ function renderCart() {
   ${CART.mode === 'Cash' ? `<div class="row"><div class="sp"><label class="f">Cash received</label><input id="tender" type="number" inputmode="numeric" value="${esc(CART.tender)}" placeholder="${total}"></div><div class="sp"><label class="f">Return change</label><div class="b" style="font-size:20px;padding:6px 0">${tender >= total && tender ? inr(tender - total) : '—'}</div></div></div>` :
     `${CART.mode === 'Split' ? `<label class="f">Cash part</label><input id="splitc" type="number" inputmode="numeric" value="${esc(CART.split)}" placeholder="0"><div class="small mute" style="margin:4px 0 8px">UPI part: <b>${inr(total - splitCash)}</b></div>` : ''}
    <div class="row" style="align-items:flex-start;gap:14px"><div id="qr" style="width:120px;height:120px;flex:none;background:#f4f5f7;border-radius:8px"></div><div class="sp"><div class="small mute">Customer scans to pay</div><div class="b" style="font-size:18px">${inr(CART.mode === 'Split' ? total - splitCash : total)}</div><div class="small mono mute">${esc(shopById(CART.shopId).upi || 'Set the UPI ID in Settings')}</div><input id="upiref" placeholder="UTR / ref no. (optional)" value="${esc(CART.upiRef)}" style="margin-top:8px"><label class="row small" style="margin-top:8px;font-weight:600"><input type="checkbox" id="upiok" style="width:auto" ${CART.upiOk ? 'checked' : ''}> Payment received on phone</label></div></div>`}
-  ${P.ageCheck ? `<label class="row small" style="margin-top:12px;font-weight:600;padding:8px 10px;background:#fafbfc;border-radius:8px"><input type="checkbox" id="age" style="width:auto" ${CART.age ? 'checked' : ''}> Customer is ${P.ageLimit}+ (legal drinking age checked)</label>` : ''}
+  ${P.ageCheck ? `<label class="row small" style="margin-top:12px;font-weight:600;padding:8px 10px;background:var(--soft);border-radius:8px"><input type="checkbox" id="age" style="width:auto" ${CART.age ? 'checked' : ''}> Customer is ${P.ageLimit}+ (legal drinking age checked)</label>` : ''}
   <button class="btn p lg" id="pay" style="width:100%;justify-content:center;margin-top:12px" ${ready ? '' : 'disabled'}>${ic('lock')} Confirm &amp; lock bill · ${inr(total)}</button>
   ${CART.lines.length ? '<button class="btn sm" id="clr" style="margin-top:8px">Clear bill</button>' : ''}`;
   $$('[data-q]').forEach(b => b.onclick = () => {

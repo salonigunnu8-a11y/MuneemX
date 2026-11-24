@@ -44,7 +44,9 @@ const ICON = {
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
-  cloud: '<path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19.5 10 4 4 0 0 1 18 18z"/>'
+  cloud: '<path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19.5 10 4 4 0 0 1 18 18z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'
 };
 const ic = (n, s) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${s ? `style="width:${s}px;height:${s}px"` : ''}>${ICON[n] || ''}</svg>`;
 
@@ -67,6 +69,7 @@ const monthKey = () => { const d = new Date(Date.now() - BIZ); return d.getFullY
 const monthStart = () => { const d = new Date(Date.now() - BIZ); return new Date(d.getFullYear(), d.getMonth(), 1).getTime() + BIZ; };
 function fnv(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
 function ean(b12) { let s = 0; for (let i = 0; i < 12; i++) s += (+b12[i]) * (i % 2 ? 3 : 1); return b12 + ((10 - s % 10) % 10); }
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#e5e7eb';
 const slugify = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 
 function toast(msg, kind) { const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg; $('#toasts').appendChild(t); setTimeout(() => t.remove(), 3600); }
@@ -152,7 +155,18 @@ Reply with only JSON: {"brand":string,"name":string (variant, e.g. "Deluxe Whisk
 };
 const aiIdentify = file => API.aiScan('identify', file, catalogText());
 const aiEnroll = file => API.aiScan('enroll', file, '');
-function barSvg(code) { let x = 0, out = ''; const s = String(code); for (let i = 0; i < s.length; i++) { const d = +s[i] || 0; for (let k = 0; k < 3; k++) { const w = ((d + k * 3 + i) % 3) + 1; if ((i + k) % 2 === 0) out += `<rect x="${x}" y="0" width="${w}" height="26"/>`; x += w + 1; } } return `<svg viewBox="0 0 ${x} 26" preserveAspectRatio="none" fill="#111">${out}</svg>`; }
+function barSvg(code) { let x = 0, out = ''; const s = String(code); for (let i = 0; i < s.length; i++) { const d = +s[i] || 0; for (let k = 0; k < 3; k++) { const w = ((d + k * 3 + i) % 3) + 1; if ((i + k) % 2 === 0) out += `<rect x="${x}" y="0" width="${w}" height="26"/>`; x += w + 1; } } return `<svg viewBox="0 0 ${x} 26" preserveAspectRatio="none" fill="currentColor">${out}</svg>`; }
 function hashSale(s) { return fnv(s.prev + '|' + s.no + '|' + s.ts + '|' + s.total + '|' + s.mode + '|' + s.items.map(i => i.pid + 'x' + i.qty + '@' + i.price).join(',')); }
 function saveSes() { try { sessionStorage.setItem('mx_ses_' + API.mode, JSON.stringify(SES)); } catch (e) { } }
 function loadSes() { try { return JSON.parse(sessionStorage.getItem('mx_ses_' + API.mode)); } catch (e) { return null; } }
+
+// ---- language & theme toggles (shown in the top bar and on the sign-in page) ----
+const isDark = () => document.documentElement.dataset.theme === 'dark';
+function toolsHtml() {
+  return `<button class="tool" id="langbtn" title="${LANG.cur === 'hi' ? 'English' : 'हिन्दी'}">${LANG.cur === 'hi' ? 'EN' : 'हिं'}</button><button class="tool" id="themebtn" title="${isDark() ? t('Light mode') : t('Dark mode')}">${ic(isDark() ? 'sun' : 'moon')}</button>`;
+}
+function wireTools(rerender) {
+  const lb = $('#langbtn'), tb = $('#themebtn');
+  if (lb) lb.onclick = () => { setLang(LANG.cur === 'hi' ? 'en' : 'hi'); rerender(); };
+  if (tb) tb.onclick = () => { const d = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = d; try { localStorage.setItem('mx_theme', d); } catch (e) { } rerender(); };
+}
