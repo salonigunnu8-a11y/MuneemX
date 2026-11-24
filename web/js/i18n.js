@@ -18,6 +18,11 @@ const HI = {
   'Demo mode — sample data in this browser. Connect Supabase to go live.': 'डेमो मोड — नमूना डेटा इसी ब्राउज़र में है। लाइव करने के लिए Supabase जोड़ें।',
   'Demo mode · data stays in this browser': 'डेमो मोड · डेटा इसी ब्राउज़र में रहता है',
   'Light': 'लाइट', 'Dark': 'डार्क', 'Light mode': 'लाइट मोड', 'Dark mode': 'डार्क मोड', 'Language': 'भाषा',
+  'Barcode scanner test': 'बारकोड स्कैनर जाँच', 'Click here, then scan': 'यहाँ क्लिक करें, फिर स्कैन करें',
+  'Click the box and scan any bottle. It shows what your USB / Bluetooth scanner sends and whether it is set up correctly.': 'बॉक्स पर क्लिक करके कोई भी बोतल स्कैन करें। यह दिखाएगा कि आपका USB / Bluetooth स्कैनर क्या भेज रहा है और सही सेट है या नहीं।',
+  'Received': 'मिला', 'characters': 'अक्षर', 'Scanner detected': 'स्कैनर पहचाना गया', 'Typed slowly — looks like a keyboard, not a scanner': 'धीरे टाइप हुआ — स्कैनर नहीं, कीबोर्ड लगता है',
+  'Ends with Enter — perfect': 'अंत में Enter — बिल्कुल सही', 'No Enter at the end — still works, but set the scanner suffix to Enter (CR) for speed': 'अंत में Enter नहीं — फिर भी चलेगा, पर तेज़ी के लिए स्कैनर का suffix Enter (CR) सेट करें',
+  'Not in your database yet — link it in Inventory → Link barcodes': 'अभी डेटाबेस में नहीं — स्टॉक → बारकोड जोड़ें में जोड़ें',
   // ---- sign-in ----
   'Sign in': 'लॉगिन करें', "Who's signing in?": 'कौन लॉगिन कर रहा है?', 'Workspace': 'वर्कस्पेस', 'PIN': 'पिन', 'Every demo PIN is': 'हर डेमो पिन है',
   'Every bottle scanned. Every rupee accounted.': 'हर बोतल स्कैन। हर रुपये का हिसाब।', 'Run every liquor shop on one platform.': 'हर शराब दुकान एक ही प्लेटफ़ॉर्म पर चलाएँ।',

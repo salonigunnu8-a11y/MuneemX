@@ -89,7 +89,8 @@ VIEWS.pos = function () {
    <div class="small mute" style="margin-top:12px;display:flex;justify-content:space-between"><span>My bills today: <b>${mine.length}</b></span><span>My sales: <b>${inr(sum(mine, s => s.total))}</b></span></div>
   </div></div>`;
   const si = $('#scanin'); si.focus();
-  si.onkeydown = e => { if (e.key === 'Enter' || (e.key === 'Tab' && si.value.trim())) { e.preventDefault(); posScan(si.value); si.value = ''; } };
+  si.onkeydown = e => { if (e.key === 'Enter' || e.key === 'NumpadEnter' || (e.key === 'Tab' && si.value.trim())) { e.preventDefault(); posScan(si.value); si.value = ''; } };
+  autoSubmitBox(si, posScan);
   SCAN_HANDLER = code => posScan(code);
   $('#camlive').onclick = () => openCamera(code => posScan(code));
   $$('[data-bc]').forEach(b => b.onclick = () => { posScan(b.dataset.bc); si.focus(); });

@@ -27,21 +27,62 @@ const linkedCodes = pid => Object.entries(S.barcodes || {}).filter(([, v]) => v 
 
 /* ---------- 1. keyboard-wedge scanners anywhere on the page ---------- */
 (function () {
-  let buf = '', last = 0;
+  let buf = '', last = 0, idle = null;
+  const fire = () => { const c = buf; buf = ''; if (c.length >= 4 && SCAN_HANDLER) SCAN_HANDLER(c); };
   document.addEventListener('keydown', e => {
     if (!SCAN_HANDLER || e.ctrlKey || e.altKey || e.metaKey) return;
     const el = document.activeElement, typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     if (typing || $('#modal').innerHTML) { buf = ''; return; }   // a focused box handles its own Enter
     const now = Date.now();
     if (now - last > 80) buf = '';                               // scanners type a burst within ~30 ms per key
-    last = now;
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (buf.length >= 4) { e.preventDefault(); const c = buf; buf = ''; SCAN_HANDLER(c); }
+    last = now; clearTimeout(idle);
+    if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'NumpadEnter') {
+      if (buf.length >= 4) { e.preventDefault(); fire(); }
       buf = ''; return;
     }
-    if (e.key.length === 1) buf += e.key;
+    if (e.key.length === 1) {
+      buf += e.key;
+      // scanner set to "no suffix": a fast burst of 8+ characters followed by silence counts as a scan
+      idle = setTimeout(() => { if (buf.length >= 8) fire(); else buf = ''; }, 160);
+    }
   }, true);
 })();
+
+// For a focused scan box: submit automatically when a scanner without an Enter suffix
+// fills it with a known barcode in one fast burst.
+function autoSubmitBox(input, submit) {
+  let first = 0, timer = null;
+  input.addEventListener('input', () => {
+    const v = input.value; if (v.length <= 1) first = Date.now();
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const val = normCode(input.value), fast = Date.now() - first < 160 + val.length * 60;
+      if (val.length >= 8 && fast && /^[0-9A-Za-z-]+$/.test(val)) { input.value = ''; submit(val); }
+    }, 180);
+  });
+}
+
+// Scanner self-test (Settings): shows exactly what the scanner sends.
+function scannerTest(input, out) {
+  let keys = [], timer = null;
+  const report = endedWithEnter => {
+    if (!keys.length) return;
+    const code = keys.map(k => k.k).join(''), gaps = keys.slice(1).map((k, i) => k.t - keys[i].t);
+    const avg = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 0;
+    const p = findByBarcode(code), isScanner = avg < 50;
+    out.innerHTML = `<div class="flash ${isScanner && endedWithEnter ? 'ok' : 'info'}" style="margin-top:10px">
+      <div>${t('Received')}: <b class="mono">${esc(code)}</b> (${code.length} ${t('characters')})</div>
+      <div>${isScanner ? '✓ ' + t('Scanner detected') : '⚠ ' + t('Typed slowly — looks like a keyboard, not a scanner')} · ${avg} ms</div>
+      <div>${endedWithEnter ? '✓ ' + t('Ends with Enter — perfect') : '⚠ ' + t('No Enter at the end — still works, but set the scanner suffix to Enter (CR) for speed')}</div>
+      <div>${p ? '✓ ' + esc(pname(p)) + ' · ' + ppack(p) : t('Not in your database yet — link it in Inventory → Link barcodes')}</div></div>`;
+    keys = []; input.value = '';
+  };
+  input.onkeydown = e => {
+    clearTimeout(timer);
+    if (e.key === 'Enter' || e.key === 'NumpadEnter' || e.key === 'Tab') { e.preventDefault(); report(true); return; }
+    if (e.key.length === 1) { keys.push({ k: e.key, t: Date.now() }); timer = setTimeout(() => report(false), 400); }
+  };
+}
 
 /* ---------- 2. live camera scanner ---------- */
 let CAM = null;
