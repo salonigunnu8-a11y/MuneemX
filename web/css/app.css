@@ -165,3 +165,12 @@ body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-i
 .camframe{position:absolute;left:12%;right:12%;top:30%;bottom:30%;border:3px solid rgba(255,255,255,.9);border-radius:12px;box-shadow:0 0 0 2000px rgba(0,0,0,.25)}
 .camframe::after{content:'';position:absolute;left:6%;right:6%;top:50%;height:2px;background:#ff3b3b;box-shadow:0 0 8px #ff3b3b;animation:scanline 1.6s ease-in-out infinite}
 @keyframes scanline{0%,100%{transform:translateY(-30px)}50%{transform:translateY(30px)}}
+
+/* discount / customer blocks, WhatsApp buttons */
+.opt{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px}
+.opt input{padding:7px 9px}
+.seg.sm button{padding:4px 10px}
+.btn.wa{background:#25d366;border-color:#25d366;color:#fff;text-decoration:none}
+.btn.wa:hover{filter:brightness(1.05)}
+.btn.wa.off{opacity:.45;cursor:not-allowed}
+a.btn{text-decoration:none}

@@ -34,12 +34,13 @@ const CloudAPI = (() => {
   const mShop = s => ({ id: s.id, tenantId: s.tenant_id, name: s.name, code: s.code, address: s.address, license: s.license, upi: s.upi, seq: s.seq, lastHash: s.last_hash });
   const mMember = m => ({ id: m.id, tenantId: m.tenant_id, userId: m.user_id, name: m.name, username: m.username, role: m.role, shopId: m.shop_id, phone: m.phone, salary: +m.salary, commission: +m.commission, joined: ms(m.joined_at), active: m.active });
   const mProduct = p => ({ id: p.id, tenantId: p.tenant_id, brand: p.brand, name: p.name, category: p.category, pack: p.pack, sizeMl: p.size_ml, mrp: +p.mrp, cost: +p.cost, barcode: p.barcode, w: +p.popularity, src: p.source, active: p.active });
-  const mSale = s => ({ id: s.id, no: s.bill_no, tenantId: s.tenant_id, shopId: s.shop_id, userId: s.member_id, ts: ms(s.ts), total: +s.total, cost: +s.cost, mode: s.mode, cash: +s.cash, upi: +s.upi, upiRef: s.upi_ref, status: s.status, prev: s.prev_hash, hash: s.hash, voidBy: s.void_by, voidReason: s.void_reason, voidTs: ms(s.void_ts),
+  const mSale = s => ({ id: s.id, no: s.bill_no, tenantId: s.tenant_id, shopId: s.shop_id, userId: s.member_id, ts: ms(s.ts), total: +s.total, cost: +s.cost, mode: s.mode, cash: +s.cash, upi: +s.upi, gross: +(s.gross ?? s.total), discount: +(s.discount || 0), credit: +(s.credit || 0), customerId: s.customer_id, upiRef: s.upi_ref, status: s.status, prev: s.prev_hash, hash: s.hash, voidBy: s.void_by, voidReason: s.void_reason, voidTs: ms(s.void_ts),
     items: (s.sale_items || []).sort((a, b) => a.id - b.id).map(i => ({ pid: i.product_id, qty: i.qty, price: +i.price, cost: +i.cost, m: i.method })) });
   const mMove = m => ({ id: m.id, shopId: m.shop_id, ts: ms(m.ts), pid: m.product_id, qty: m.qty, type: m.type, ref: m.ref, party: m.party, by: m.member_id });
+  const mCPay = x => ({ id: x.id, tenantId: x.tenant_id, shopId: x.shop_id, customerId: x.customer_id, amount: +x.amount, mode: x.mode, note: x.note, ts: ms(x.ts), by: x.member_id });
   const mExp = e => ({ id: e.id, tenantId: e.tenant_id, shopId: e.shop_id, ts: ms(e.ts), cat: e.category, amount: +e.amount, note: e.note, mode: e.mode, by: e.member_id });
 
-  function emptyState() { return { tenants: [], shops: [], users: [], products: [], stock: {}, sales: [], moves: [], expenses: [], attendance: {}, advances: [], payroll: [], closings: [], audit: [], me: null, loadedFrom: Date.now() }; }
+  function emptyState() { return { customers: [], creditPayments: [], tenants: [], shops: [], users: [], products: [], stock: {}, sales: [], moves: [], expenses: [], attendance: {}, advances: [], payroll: [], closings: [], audit: [], me: null, loadedFrom: Date.now() }; }
 
   async function fetchSales(tid, from, to) {
     return (await all(() => { let q = client().from('sales').select('*, sale_items(*)').eq('tenant_id', tid).gte('ts', new Date(from).toISOString()).order('ts'); if (to) q = q.lt('ts', new Date(to).toISOString()); return q; })).map(mSale);
@@ -53,7 +54,7 @@ const CloudAPI = (() => {
 
   async function loadWorkspace(tid) {
     const c = client(), from = sod(Date.now()) - LOAD_DAYS * DAY, fromIso = new Date(from).toISOString(), m0 = new Date(Math.min(from, monthStart())).toISOString();
-    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud, bcs] = await Promise.all([
+    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud, bcs, custs, cpay] = await Promise.all([
       c.from('tenants').select('*').eq('id', tid).single().then(ok),
       c.from('shops').select('*').eq('tenant_id', tid).order('created_at').then(ok),
       c.from('members').select('*').eq('tenant_id', tid).order('joined_at').then(ok),
@@ -67,7 +68,9 @@ const CloudAPI = (() => {
       c.from('payroll').select('*').eq('tenant_id', tid).then(ok).catch(() => []),
       c.from('day_closings').select('*').eq('tenant_id', tid).gte('day', fromIso.slice(0, 10)).then(ok).catch(() => []),
       c.from('audit_log').select('*').eq('tenant_id', tid).order('ts', { ascending: false }).limit(300).then(ok).catch(() => []),
-      all(() => c.from('product_barcodes').select('barcode,product_id').eq('tenant_id', tid)).catch(() => [])]);
+      all(() => c.from('product_barcodes').select('barcode,product_id').eq('tenant_id', tid)).catch(() => []),
+      all(() => c.from('customers').select('id,name,phone').eq('tenant_id', tid)).catch(() => []),
+      all(() => c.from('credit_payments').select('*').eq('tenant_id', tid).gte('ts', fromIso).order('ts')).catch(() => [])]);
     const keepMe = S && S.me;
     S = emptyState(); S.me = keepMe; S.loadedFrom = from;
     S.tenants = [mTenant(tn)]; S.shops = shops.map(mShop); S.users = members.map(mMember); S.products = products.map(mProduct);
@@ -78,6 +81,7 @@ const CloudAPI = (() => {
     S.closings = closes.map(x => ({ shopId: x.shop_id, date: x.day, expected: +x.expected, counted: +x.counted, variance: +x.variance, ts: ms(x.ts), by: x.member_id }));
     S.audit = aud.map(a => ({ ts: ms(a.ts), by: a.member_id, t: a.tenant_id, a: a.action, d: a.detail }));
     S.barcodes = {}; bcs.forEach(b => S.barcodes[b.barcode] = b.product_id);
+    S.customers = custs; S.creditPayments = cpay.map(mCPay);
     if (S.me && S.me.tenantId === tid) S.me = S.users.find(u => u.id === S.me.id) || S.me;
     startRealtime(tid);
   }
@@ -164,8 +168,10 @@ const CloudAPI = (() => {
     // returns a one-time approval token (string) or null; the token is then passed instead of the PIN
     async verifyApproval(shopId, approverId, pin) { return ok(await client().rpc('verify_approval', { p_shop: shopId || null, p_approver: approverId, p_pin: pin })) || null; },
     async lockSale(shopId, lines, pay, approval) {
-      const r = ok(await client().rpc('lock_sale', { p_shop: shopId, p_lines: lines.map(l => ({ product_id: l.pid, qty: l.qty, method: l.m })), p_mode: pay.mode, p_cash: pay.cash || 0, p_upi_ref: pay.upiRef || '', p_approver: approval ? approval.approverId : null, p_pin: approval ? approval.pin : null }));
-      const sale = { id: r.id, no: r.bill_no, tenantId: SES.tenantId, shopId, userId: S.me.id, ts: ms(r.ts), total: +r.total, cost: +r.cost, mode: r.mode, cash: +r.cash, upi: +r.upi, upiRef: pay.upiRef || '', status: 'locked', prev: r.prev_hash, hash: r.hash,
+      const r = ok(await client().rpc('lock_sale', { p_shop: shopId, p_lines: lines.map(l => ({ product_id: l.pid, qty: l.qty, method: l.m })), p_mode: pay.mode, p_cash: pay.cash || 0, p_upi_ref: pay.upiRef || '', p_approver: approval ? approval.approverId : null, p_pin: approval ? approval.pin : null, p_discount: pay.discount || 0, p_cust_name: pay.custName || '', p_cust_phone: pay.custPhone || '' }));
+      if (r.customer_id && !(S.customers || []).some(c => c.id === r.customer_id)) (S.customers = S.customers || []).push({ id: r.customer_id, name: pay.custName || '', phone: normPhone(pay.custPhone) });
+      else if (r.customer_id && pay.custName) { const c = S.customers.find(c => c.id === r.customer_id); if (c) c.name = pay.custName; }
+      const sale = { id: r.id, no: r.bill_no, tenantId: SES.tenantId, shopId, userId: S.me.id, ts: ms(r.ts), total: +r.total, gross: +r.gross, discount: +r.discount, credit: +r.credit, customerId: r.customer_id, cost: +r.cost, mode: r.mode, cash: +r.cash, upi: +r.upi, upiRef: pay.upiRef || '', status: 'locked', prev: r.prev_hash, hash: r.hash,
         items: lines.map(l => { const p = prodById(l.pid); return { pid: l.pid, qty: l.qty, price: p.mrp, cost: p.cost, m: l.m }; }) };
       if (!S.sales.find(x => x.id === sale.id)) S.sales.push(sale);
       lines.forEach(l => { S.stock[shopId] = S.stock[shopId] || {}; S.stock[shopId][l.pid] = (S.stock[shopId][l.pid] || 0) - l.qty; });
@@ -235,6 +241,14 @@ const CloudAPI = (() => {
     async linkBarcode(pid, code, approverId, token) {
       ok(await client().rpc('link_barcode', { p_product: pid, p_barcode: code, p_approver: approverId || null, p_pin: token || null }));
       (S.barcodes = S.barcodes || {})[code] = pid;
+    },
+    async creditSummary() {
+      return ok(await client().rpc('credit_summary')).map(r => ({ id: r.customer_id, name: r.name, phone: r.phone, credit: +r.credit_total, paid: +r.paid_total, due: +r.due, bills: r.bills, last: ms(r.last_bill) }));
+    },
+    async customerBills(cid) { return ok(await client().from('sales').select('*, sale_items(*)').eq('customer_id', cid).order('ts', { ascending: false }).limit(200)).map(mSale); },
+    async receiveCredit(cid, amount, mode, shopId, note) {
+      ok(await client().rpc('receive_credit', { p_customer: cid, p_amount: amount, p_mode: mode, p_shop: shopId, p_note: note || '' }));
+      (S.creditPayments = S.creditPayments || []).push({ id: uid('cp'), tenantId: SES.tenantId, shopId, customerId: cid, amount, mode, note, ts: Date.now(), by: S.me.id });
     },
     async unlinkBarcode(code) { ok(await client().rpc('unlink_barcode', { p_barcode: code })); delete S.barcodes[code]; },
     async adminOverview() {

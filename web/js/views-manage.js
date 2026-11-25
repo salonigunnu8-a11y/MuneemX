@@ -265,14 +265,18 @@ REP.close = function () {
   if (S.loadedFrom && d0 < S.loadedFrom) { $('#rep').innerHTML = '<div class="card empty"><span class="spin dk"></span> Loading…</div>'; API.ensureRange(d0).then(() => REP.close(), e => toast(errText(e), 'bad')); return; }
   const all = S.sales.filter(s => s.shopId === sh && s.ts >= d0 && s.ts < d0 + DAY), live = all.filter(s => s.status !== 'void');
   const cash = sum(live, s => s.cash), upi = sum(live, s => s.upi), cex = sum(S.expenses.filter(e => e.shopId === sh && e.ts >= d0 && e.ts < d0 + DAY && e.mode === 'Cash'), e => e.amount);
-  const expected = cash - cex; const closed = S.closings.find(c => c.shopId === sh && c.date === SUB.date);
+  const credit = sum(live, s => s.credit || 0), cpay = (S.creditPayments || []).filter(p => p.shopId === sh && p.ts >= d0 && p.ts < d0 + DAY);
+  const ccash = sum(cpay.filter(p => p.mode === 'Cash'), p => p.amount), cupi = sum(cpay.filter(p => p.mode === 'UPI'), p => p.amount);
+  const expected = cash + ccash - cex; const closed = S.closings.find(c => c.shopId === sh && c.date === SUB.date);
   const counted = SUB.counted ?? (closed ? closed.counted : ''); const v = counted === '' ? null : +counted - expected;
   const byU = {}; live.forEach(s => { byU[s.userId] = byU[s.userId] || { c: 0, u: 0, n: 0 }; byU[s.userId].c += s.cash; byU[s.userId].u += s.upi; byU[s.userId].n++; });
   $('#rep').innerHTML = `<div class="grid g12"><div class="card"><h3>Close the day</h3><div class="grid">
    <div class="row">${role() === 'owner' ? `<select id="csh2" style="width:auto">${tShops().map(s => `<option value="${s.id}" ${s.id === sh ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}<input type="date" id="cd" value="${SUB.date}" style="width:auto"></div>
-   <div class="sw"><span>Gross sales (${live.length} bills)</span><b>${inr(cash + upi)}</b></div>
+   <div class="sw"><span>Gross sales (${live.length} bills)</span><b>${inr(cash + upi + credit)}</b></div>
    <div class="sw"><span>UPI received</span><b>${inr(upi)}</b></div>
+   ${credit ? `<div class="sw"><span>Udhar given (not in drawer)</span><b style="color:var(--warn)">${inr(credit)}</b></div>` : ''}
    <div class="sw"><span>Cash sales</span><b>${inr(cash)}</b></div>
+   ${ccash || cupi ? `<div class="sw"><span>Udhar collected in cash</span><b>+ ${inr(ccash)}</b></div>${cupi ? `<div class="sw"><span>Udhar collected by UPI</span><b>${inr(cupi)}</b></div>` : ''}` : ''}
    <div class="sw"><span>Cash expenses paid from counter</span><b>− ${inr(cex)}</b></div>
    <div class="sw"><span class="b">Expected cash in drawer</span><b style="font-size:18px">${inr(expected)}</b></div>
    <div><label class="f">Cash counted in drawer ₹</label><input id="ccount" type="number" inputmode="numeric" value="${esc(counted)}" ${closed ? 'disabled' : ''}></div>
@@ -280,12 +284,12 @@ REP.close = function () {
    ${closed ? `<div class="flash ok">${ic('lock', 14)} Day closed by ${esc(userById(closed.by)?.name || '')} at ${dtm(closed.ts)}</div>` : `<button class="btn p" id="cclose" ${counted === '' ? 'disabled' : ''}>${ic('lock')} Close day & lock</button>`}
    <button class="btn" id="ccopy">${ic('copy')} Copy closing summary</button></div></div>
    <div class="card"><h3>Collection by salesman</h3><table><tr><th>Salesman</th><th class="r">Bills</th><th class="r">Cash to hand over</th><th class="r">UPI</th></tr>${Object.entries(byU).map(([u, x]) => `<tr><td class="b small">${esc(userById(u)?.name)}</td><td class="r">${x.n}</td><td class="r b">${inr(x.c)}</td><td class="r">${inr(x.u)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">No bills</td></tr>'}</table>
-   <h3 style="margin-top:18px">Exceptions</h3><table><tr><th>Bill</th><th>Issue</th><th class="r">Amount</th></tr>${all.filter(s => s.status === 'void' || s.items.some(i => i.m === 'ovr')).map(s => `<tr><td class="mono small">${s.no}</td><td class="small">${s.status === 'void' ? '<span class="badge bad">Void</span> ' + esc(s.voidReason) : '<span class="badge warn">Manual override</span>'}</td><td class="r">${inr(s.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">No exceptions 🎉</td></tr>'}</table></div></div>`;
+   <h3 style="margin-top:18px">Exceptions</h3><table><tr><th>Bill</th><th>Issue</th><th class="r">Amount</th></tr>${all.filter(s => s.status === 'void' || s.items.some(i => i.m === 'ovr') || s.discount > 0).map(s => `<tr><td class="mono small">${s.no}</td><td class="small">${s.status === 'void' ? '<span class="badge bad">Void</span> ' + esc(s.voidReason) : s.items.some(i => i.m === 'ovr') ? '<span class="badge warn">Manual override</span>' : `<span class="badge warn">${t('Discount')}</span> − ${inr(s.discount)}`}</td><td class="r">${inr(s.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">No exceptions 🎉</td></tr>'}</table></div></div>`;
   if ($('#csh2')) $('#csh2').onchange = e => { SUB = { tab: 'close', shop: e.target.value, date: SUB.date }; REP.close(); };
   $('#cd').onchange = e => { SUB = { tab: 'close', shop: sh, date: e.target.value }; REP.close(); };
   $('#ccount').onchange = e => { SUB.counted = e.target.value; SUB.shop = sh; REP.close(); };
   if ($('#cclose')) $('#cclose').onclick = async () => { const ok = await run(async () => { await API.closeDay(sh, SUB.date, expected, +counted); return true; }, $('#cclose')); if (ok) { toast('Day closed', 'ok'); REP.close(); } };
-  $('#ccopy').onclick = () => copyText(`${tenant().name} — ${shopById(sh).name}\nDay close ${SUB.date}\nBills: ${live.length}\nGross: ${inr(cash + upi)}\nUPI: ${inr(upi)}\nCash: ${inr(cash)}\nCash expenses: ${inr(cex)}\nExpected drawer: ${inr(expected)}${v != null ? `\nCounted: ${inr(counted)}\nVariance: ${inr(v)}` : ''}\nVoids: ${all.length - live.length}`);
+  $('#ccopy').onclick = () => copyText(`${tenant().name} — ${shopById(sh).name}\nDay close ${SUB.date}\nBills: ${live.length}\nGross: ${inr(cash + upi + credit)}\nUPI: ${inr(upi)}\nCash: ${inr(cash)}\nUdhar given: ${inr(credit)}\nUdhar collected: ${inr(ccash + cupi)}\nCash expenses: ${inr(cex)}\nExpected drawer: ${inr(expected)}${v != null ? `\nCounted: ${inr(counted)}\nVariance: ${inr(v)}` : ''}\nVoids: ${all.length - live.length}`);
 };
 REP.pl = function () {
   const ids = scope(), d = new Date(Date.now() - BIZ), m0 = monthStart();
@@ -328,8 +332,6 @@ VIEWS.settings = function () {
    ${sw('override', 'Allow manager override', 'Manual add with manager PIN; flagged on the bill')}
    ${sw('mrpLock', 'Lock price at MRP', 'Salesmen cannot change prices')}
    ${sw('stockLock', 'Block sale beyond stock', 'Prevents billing bottles the system says you don\'t have')}
-   ${sw('ageCheck', 'Age confirmation at checkout', 'Salesman confirms legal drinking age on every bill')}
-   <div class="sw"><div><div class="b">Legal drinking age</div><div class="small mute">Varies by state</div></div><select id="agel" style="width:90px">${[18, 21, 23, 25].map(a => `<option ${P.ageLimit === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
   <div class="card"><h3>Shops & UPI</h3><div class="tbl" style="border:0"><table><tr><th>Shop</th><th>Code</th><th>Licence</th><th>UPI ID</th></tr>${tShops().map(s => `<tr><td><input data-sh="${s.id}|name" value="${esc(s.name)}"></td><td class="mono small">${s.code}</td><td><input data-sh="${s.id}|license" value="${esc(s.license)}" class="mono"></td><td><input data-sh="${s.id}|upi" value="${esc(s.upi)}" class="mono" placeholder="name@bank"></td></tr>`).join('')}</table></div>
    <div class="row" style="margin-top:12px"><button class="btn" id="addshop">${ic('plus')} Add shop</button><span class="sp"></span><span class="small mute">Changes save when you leave a field</span></div></div>
   <div class="card"><h3>${ic('scan', 16)} Barcode scanner test</h3><p class="mute small" style="margin-top:0">Click the box and scan any bottle. It shows what your USB / Bluetooth scanner sends and whether it is set up correctly.</p><input id="sctest" class="mono" placeholder="Click here, then scan" autocomplete="off"><div id="scout"></div></div>
@@ -341,7 +343,6 @@ VIEWS.settings = function () {
   };
   $('#bc').oninput = e => setBrand(e.target.value);
   $$('[data-pol]').forEach(i => i.onchange = () => run(() => API.saveTenant({ pol: { ...pol(), [i.dataset.pol]: i.checked } })).then(() => toast('Policy updated')));
-  $('#agel').onchange = e => run(() => API.saveTenant({ pol: { ...pol(), ageLimit: +e.target.value } }));
   $$('[data-sh]').forEach(i => i.onchange = () => { const [id, k] = i.dataset.sh.split('|'); run(() => API.saveShop(id, { [k]: i.value })); });
   $('#addshop').onclick = async () => { await run(() => API.addShop(), $('#addshop')); render(); };
   if ($('#simt')) $('#simt').onclick = () => { S.sim = !S.sim; API.save(); render(); };

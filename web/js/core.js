@@ -17,7 +17,7 @@ const PACKS = ['Full', 'Half', 'Quarter', 'Pint', 'Can', 'Bottle', 'Nip'];
 const PACK_ML = { Full: 750, Half: 375, Quarter: 180, Pint: 650, Can: 500, Bottle: 275, Nip: 90 };
 const CATS = ['Whisky', 'Scotch', 'Rum', 'Vodka', 'Brandy', 'Gin', 'Beer', 'Wine', 'RTD'];
 const ECATS = ['Rent', 'Electricity', 'Salary', 'Transport', 'Tea & snacks', 'Maintenance', 'Security', 'Licence & fees', 'Breakage', 'Police/Local', 'Other'];
-const DEF_POL = { requireScan: true, override: true, mrpLock: true, stockLock: true, ageCheck: true, ageLimit: 21 };
+const DEF_POL = { requireScan: true, override: true, mrpLock: true, stockLock: true, ageCheck: false, ageLimit: 21 };
 const PLANS = [
   { k: 'Starter', p: 799, u: 'per shop / month', f: ['1 shop, up to 3 logins', 'Scan-locked billing, Cash + UPI', 'Stock, expenses, day close', 'Daily WhatsApp summary'] },
   { k: 'Pro', p: 1499, u: 'per shop / month', f: ['Everything in Starter', 'AI label scan & enrollment', 'Staff salary & commission', 'Live per-minute dashboard'] },
@@ -45,6 +45,8 @@ const ICON = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   cloud: '<path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19.5 10 4 4 0 0 1 18 18z"/>',
+  book: '<path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17a3 3 0 0 1 3-3h11M8 8h6"/>',
+  wa: '<path d="M3.5 20.5l1.3-4.4A8.5 8.5 0 1 1 8 19.3z"/><path d="M9 8.5c0 3.5 3 6.5 6.5 6.5l1.2-1.6-2.1-1-1 .9c-1.3-.5-2.4-1.6-2.9-2.9l.9-1-1-2.1z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'
 };
@@ -169,4 +171,15 @@ function wireTools(rerender) {
   const lb = $('#langbtn'), tb = $('#themebtn');
   if (lb) lb.onclick = () => { setLang(LANG.cur === 'hi' ? 'en' : 'hi'); rerender(); };
   if (tb) tb.onclick = () => { const d = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = d; try { localStorage.setItem('mx_theme', d); } catch (e) { } rerender(); };
+}
+
+// ---- customers, udhar & WhatsApp ----
+const modeLabel = m => m === 'Credit' ? t('Udhar') : t(m);
+function normPhone(p) { let d = String(p || '').replace(/\D/g, ''); if (d.length === 12 && d.startsWith('91')) d = d.slice(2); if (d.length === 11 && d.startsWith('0')) d = d.slice(1); return d; }
+const waLink = (phone, text) => `https://wa.me/91${normPhone(phone)}?text=${encodeURIComponent(text)}`;
+function reminderText(c, shop) {
+  const tn = tenant(), upi = shop && shop.upi ? shop.upi : (tShops().find(s => s.upi) || {}).upi;
+  return LANG.cur === 'hi'
+    ? `नमस्ते ${c.name} जी 🙏\n${tn.name}${shop ? ' (' + shop.name + ')' : ''} में आपका उधार *₹${Math.round(c.due)}* बाकी है।\nकृपया जल्दी भुगतान करें।${upi ? '\nUPI: ' + upi : ''}\nधन्यवाद`
+    : `Namaste ${c.name} ji 🙏\n${tn.name}${shop ? ' (' + shop.name + ')' : ''} par aapka udhar *₹${Math.round(c.due)}* baaki hai.\nKripya jaldi bhugtan karein.${upi ? '\nUPI: ' + upi : ''}\nDhanyavaad`;
 }

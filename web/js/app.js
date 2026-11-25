@@ -13,6 +13,7 @@ const NAV = [
   { k: 'dashboard', t: 'Dashboard', i: 'grid', roles: ['owner', 'manager'] },
   { k: 'pos', t: 'Scan & Sell', i: 'scan', roles: ['owner', 'manager', 'salesman'] },
   { k: 'bills', t: 'Bills', i: 'receipt', roles: ['owner', 'manager', 'salesman'] },
+  { k: 'credit', t: 'Udhar (Credit)', i: 'book', roles: ['owner', 'manager'] },
   { k: 'inventory', t: 'Inventory', i: 'box', roles: ['owner', 'manager'] },
   { k: 'expenses', t: 'Expenses', i: 'wallet', roles: ['owner', 'manager'] },
   { k: 'staff', t: 'Staff & Salary', i: 'users', roles: ['owner', 'manager'] },

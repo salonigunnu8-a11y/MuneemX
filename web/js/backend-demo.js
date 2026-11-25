@@ -123,12 +123,21 @@ const DemoAPI = (() => {
   const log = (a, d) => DB.audit.push({ ts: Date.now(), by: SES && (SES.imp ? 'u0' : SES.userId), t: SES && SES.tenantId, a, d });
   const pinOk = (approverId, pin, shopId) => { const u = DB.users.find(x => x.id === approverId); return !!u && u.pin === pin && (u.role === 'owner' || (u.role === 'manager' && (!shopId || u.shopId === shopId))); };
 
+  function demoCustomer(name, phone) {
+    phone = normPhone(phone); name = String(name || '').trim(); if (!name && !phone) return null;
+    DB.customers = DB.customers || [];
+    let c = phone && DB.customers.find(x => x.tenantId === SES.tenantId && x.phone === phone);
+    if (c) { if (name) c.name = name; return c.id; }
+    c = { id: uid('c'), tenantId: SES.tenantId, name, phone }; DB.customers.push(c); return c.id;
+  }
   function commit(shopId, userId, lines, pay) {
     const sh = DB.shops.find(s => s.id === shopId);
     lines = lines.filter(l => l.qty > 0);
     const sale = { tenantId: sh.tenantId, shopId, userId, ts: Date.now(), items: lines.map(l => { const p = prodById(l.pid); return { pid: l.pid, qty: l.qty, price: p.mrp, cost: p.cost, m: l.m }; }), mode: pay.mode, upiRef: pay.upiRef || '', status: 'locked' };
-    sale.total = sum(sale.items, i => i.price * i.qty); sale.cost = sum(sale.items, i => i.cost * i.qty);
-    sale.cash = pay.mode === 'Cash' ? sale.total : pay.mode === 'UPI' ? 0 : Math.min(pay.cash, sale.total); sale.upi = sale.total - sale.cash;
+    sale.gross = sum(sale.items, i => i.price * i.qty); sale.discount = Math.round(pay.discount || 0); sale.total = sale.gross - sale.discount; sale.cost = sum(sale.items, i => i.cost * i.qty);
+    sale.credit = pay.mode === 'Credit' ? sale.total : 0;
+    sale.cash = pay.mode === 'Cash' ? sale.total : pay.mode === 'Split' ? Math.min(pay.cash, sale.total) : 0; sale.upi = sale.total - sale.cash - sale.credit;
+    sale.customerId = (pay.custName || pay.custPhone) ? demoCustomer(pay.custName, pay.custPhone) : null;
     sh.seq++; sale.no = sh.code + '-' + String(sh.seq).padStart(5, '0'); sale.id = sale.no; sale.prev = sh.lastHash; sale.hash = hashSale(sale); sh.lastHash = sale.hash;
     sale.items.forEach(i => DB.stock[shopId][i.pid] = (DB.stock[shopId][i.pid] || 0) - i.qty);
     DB.sales.push(sale); return sale;
@@ -139,7 +148,7 @@ const DemoAPI = (() => {
     async init() {
       DB = lsGet(DEMO_KEY, null);
       if (!DB || DB.v !== 3 || Date.now() - DB.seededAt > 3 * DAY) { DB = demoSeed(); save(); }
-      DB.barcodes = DB.barcodes || {}; S = DB; S.me = null;
+      DB.barcodes = DB.barcodes || {}; DB.customers = DB.customers || []; DB.creditPayments = DB.creditPayments || []; S = DB; S.me = null;
       const ses = loadSes();
       if (ses && DB.users.find(u => u.id === ses.userId)) { SES = ses; S.me = DB.users.find(u => u.id === ses.userId); return true; }
       return false;
@@ -161,9 +170,14 @@ const DemoAPI = (() => {
         if (P.stockLock && stockOf(shopId, l.pid) < l.qty) throw new Error('Stock lock: not enough ' + pname(prodById(l.pid)));
         if (l.m === 'ovr' && !(approval && pinOk(approval.approverId, approval.pin, shopId))) throw new Error('Override needs manager approval');
       }
-      if (pay.mode === 'Split') { const t = sum(lines, l => prodById(l.pid).mrp * l.qty); if (!(pay.cash > 0 && pay.cash < t)) throw new Error('Split: cash part must be between ₹1 and the bill total'); }
+      const gross = sum(lines, l => prodById(l.pid).mrp * l.qty), net = gross - (pay.discount || 0);
+      if ((pay.discount || 0) < 0 || (pay.discount || 0) >= gross) throw new Error('Discount must be less than the bill total');
+      if (pay.mode === 'Split' && !(pay.cash > 0 && pay.cash < net)) throw new Error('Split: cash part must be between ₹1 and the bill total');
+      if (pay.mode === 'Credit' && (!String(pay.custName || '').trim() || normPhone(pay.custPhone).length !== 10)) throw new Error('Udhar needs the customer name and a 10-digit mobile number');
       const sale = commit(shopId, SES.userId, lines, pay);
       if (lines.some(l => l.m === 'ovr')) log('Bill with manual override', sale.no);
+      if (sale.discount) log('Discount given', `${sale.no} · ₹${sale.discount} off ₹${sale.gross}`);
+      if (sale.credit) log('Udhar bill', `${sale.no} · ₹${sale.credit} · ${pay.custName}`);
       save(); return sale;
     },
     simulateSale() {
@@ -232,6 +246,18 @@ const DemoAPI = (() => {
       if (role() === 'salesman' && !pinOk(approverId, pin, S.me.shopId)) throw new Error('Manager approval needed');
       const owner = visibleProducts().find(p => p.barcode === code && p.id !== pid); if (owner) throw new Error('This barcode already belongs to another product');
       (DB.barcodes = DB.barcodes || {})[code] = pid; const p = prodById(pid); log('Barcode linked', `${code} → ${pname(p)} ${p.pack}`); save();
+    },
+    async creditSummary() {
+      const m = {};
+      DB.sales.filter(x => x.tenantId === SES.tenantId && x.status !== 'void' && x.credit > 0).forEach(x => { const r = m[x.customerId] = m[x.customerId] || { cr: 0, pd: 0, n: 0, last: 0 }; r.cr += x.credit; r.n++; r.last = Math.max(r.last, x.ts); });
+      DB.creditPayments.filter(x => x.tenantId === SES.tenantId).forEach(x => { const r = m[x.customerId] = m[x.customerId] || { cr: 0, pd: 0, n: 0, last: 0 }; r.pd += x.amount; });
+      return Object.entries(m).map(([id, r]) => { const c = DB.customers.find(x => x.id === id) || {}; return { id, name: c.name || '?', phone: c.phone || '', credit: r.cr, paid: r.pd, due: r.cr - r.pd, bills: r.n, last: r.last }; }).sort((a, b) => b.due - a.due);
+    },
+    async customerBills(cid) { return DB.sales.filter(x => x.customerId === cid).sort((a, b) => b.ts - a.ts); },
+    async receiveCredit(cid, amount, mode, shopId, note) {
+      const r = (await this.creditSummary()).find(x => x.id === cid); if (!r || amount <= 0 || amount > r.due) throw new Error(`Amount must be between ₹1 and the due amount (₹${r ? r.due : 0})`);
+      DB.creditPayments.push({ id: uid('cp'), tenantId: SES.tenantId, shopId, customerId: cid, amount, mode, note: note || '', ts: Date.now(), by: SES.userId });
+      log('Udhar received', `${r.name} · ₹${amount} · ${mode}`); save();
     },
     async unlinkBarcode(code) { delete DB.barcodes[code]; log('Barcode unlinked', code); save(); },
     async adminOverview() {
