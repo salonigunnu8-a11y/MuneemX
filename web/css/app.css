@@ -174,3 +174,8 @@ body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-i
 .btn.wa:hover{filter:brightness(1.05)}
 .btn.wa.off{opacity:.45;cursor:not-allowed}
 a.btn{text-decoration:none}
+
+/* product photos */
+.pimg{display:inline-grid;place-items:center;border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex:none;vertical-align:middle}
+.pimg.ph{background:var(--chip);color:var(--mute);font-weight:700}
+.bcimg{width:18px;height:18px;object-fit:contain;vertical-align:middle;margin-right:4px;border-radius:4px;background:#fff}

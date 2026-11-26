@@ -20,10 +20,11 @@ INV.stock = function () {
   const rows = ps.map(p => { const per = ids.map(id => stockOf(id, p.id)); return { p, per, q: sum(per, x => x) }; });
   $('#inv').innerHTML = `<div class="grid g4" style="margin-bottom:14px"><div class="card kpi"><div class="l">SKUs</div><div class="v">${rows.length}</div></div><div class="card kpi"><div class="l">Units in stock</div><div class="v">${sum(rows, r => r.q).toLocaleString('en-IN')}</div></div><div class="card kpi"><div class="l">Stock value (cost)</div><div class="v">${inrK(sum(rows, r => r.q * r.p.cost))}</div></div><div class="card kpi"><div class="l">Stock value (MRP)</div><div class="v">${inrK(sum(rows, r => r.q * r.p.mrp))}</div></div></div>
   <div class="card"><div class="row wrap" style="margin-bottom:12px"><input id="iq" placeholder="Search product or barcode" value="${esc(SUB.q)}" style="max-width:320px"><select id="ic" style="width:auto"><option value="all">All categories</option>${CATS.map(c => `<option ${SUB.cat === c ? 'selected' : ''}>${c}</option>`).join('')}</select><span class="sp"></span><button class="btn" id="icsv">${ic('copy')} Copy CSV</button></div>
-  <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th>Barcode</th><th class="r">MRP</th>${ids.length > 1 ? ids.map(id => `<th class="r">${esc(shopById(id).name)}</th>`).join('') : ''}<th class="r">Stock</th><th></th></tr>
-  ${rows.map(r => `<tr><td><div class="b small">${esc(pname(r.p))}</div><div class="small mute">${r.p.category}</div></td><td class="small">${ppack(r.p)}</td><td class="mono small">${r.p.barcode}</td><td class="r">${inr(r.p.mrp)}</td>${ids.length > 1 ? r.per.map(x => `<td class="r">${x}</td>`).join('') : ''}<td class="r b">${r.q}</td><td>${r.q <= 0 ? '<span class="badge bad">Out</span>' : r.q <= lowAt(r.p, ids.length) ? '<span class="badge warn">Low</span>' : '<span class="badge ok">OK</span>'}</td></tr>`).join('')}</table></div></div>`;
+  <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th>Barcode</th><th class="r">MRP</th>${ids.length > 1 ? ids.map(id => `<th class="r">${esc(shopById(id).name)}</th>`).join('') : ''}<th class="r">Stock</th><th></th><th></th></tr>
+  ${rows.map(r => `<tr><td><div class="row" style="gap:8px">${pimg(r.p, 30)}<div><div class="b small">${esc(pname(r.p))}</div><div class="small mute">${r.p.category}</div></div></div></td><td class="small">${ppack(r.p)}</td><td class="mono small">${r.p.barcode}</td><td class="r">${inr(r.p.mrp)}</td>${ids.length > 1 ? r.per.map(x => `<td class="r">${x}</td>`).join('') : ''}<td class="r b">${r.q}</td><td>${r.q <= 0 ? '<span class="badge bad">Out</span>' : r.q <= lowAt(r.p, ids.length) ? '<span class="badge warn">Low</span>' : '<span class="badge ok">OK</span>'}</td><td><button class="btn sm" data-edit="${r.p.id}">Edit</button></td></tr>`).join('')}</table></div></div>`;
   $('#iq').oninput = e => { SUB.q = e.target.value; INV.stock(); const n = $('#iq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
   $('#ic').onchange = e => { SUB.cat = e.target.value; INV.stock(); };
+  $$('[data-edit]').forEach(b => b.onclick = () => editProductModal(prodById(b.dataset.edit), () => INV.stock()));
   $('#icsv').onclick = () => copyText(['Product,Pack,Size ml,Barcode,MRP,' + ids.map(id => shopById(id).name).join(',') + ',Total', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.p.barcode},${r.p.mrp},${r.per.join(',')},${r.q}`)].join('\n'));
 };
 function productPicker(sel, onPick) {
@@ -131,11 +132,16 @@ INV.links = function () {
   $$('[data-unl]').forEach(b => b.onclick = async () => { const ok = await run(async () => { await API.unlinkBarcode(b.dataset.unl); return true; }, b); if (ok) INV.links(); });
 };
 INV.catalog = function () {
-  const F = SUB.f || (SUB.f = { brand: '', name: '', category: 'Whisky', pack: 'Quarter', sizeMl: 180, mrp: '', cost: '', barcode: '' });
-  const own = S.products.filter(p => p.tenantId === SES.tenantId);
+  const F = SUB.f || (SUB.f = { brand: '', name: '', category: 'Whisky', pack: 'Quarter', sizeMl: 180, mrp: '', cost: '', barcode: '', img: null });
+  const own = S.products.filter(p => p.tenantId === SES.tenantId), master = S.products.filter(p => !p.tenantId);
+  SUB.cq = SUB.cq || '';
+  let list = [...own, ...master];
+  if (SUB.cq) { const w = SUB.cq.toLowerCase().split(/\s+/); list = list.filter(p => w.every(x => (pname(p) + ' ' + p.pack + ' ' + p.barcode + ' ' + p.category).toLowerCase().includes(x))); }
   $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>Enroll a product</h3>
    <div class="row wrap" style="margin-bottom:12px"><button class="btn p" id="cai">${ic('spark')} Fill from label photo</button><button class="btn" id="cbc">${ic('cam')} Barcode from photo</button></div>
    <div id="cmsg"></div>
+   <div class="row" style="margin-bottom:12px;align-items:center">${F.img ? `<img class="pimg" src="${F.img.url}" style="width:72px;height:72px">` : `<span class="pimg ph" style="width:72px;height:72px">${ic('cam', 22)}</span>`}
+    <div><div class="b small">Product photo <span class="mute">(optional)</span></div><div class="row" style="margin-top:6px"><button class="btn sm" id="cimg">${ic('plus')} ${F.img ? 'Change photo' : 'Add photo'}</button>${F.img ? '<button class="btn sm d" id="cimgx">Remove</button>' : ''}</div></div></div>
    <div class="grid g2"><div><label class="f">Brand</label><input data-f="brand" value="${esc(F.brand)}"></div><div><label class="f">Variant</label><input data-f="name" value="${esc(F.name)}"></div>
    <div><label class="f">Category</label><select data-f="category">${CATS.map(c => `<option ${F.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
    <div><label class="f">Pack</label><select data-f="pack">${PACKS.map(c => `<option ${F.pack === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
@@ -143,27 +149,69 @@ INV.catalog = function () {
    <div><label class="f">Cost ₹</label><input type="number" data-f="cost" value="${esc(F.cost)}" placeholder="auto 84% of MRP"></div><div><label class="f">Barcode</label><input data-f="barcode" value="${esc(F.barcode)}" class="mono" placeholder="scan or leave blank"></div></div>
    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="csave">${ic('plus')} Save to database</button></div>
    <p class="small mute">Once saved, the product can be billed by barcode or AI label scan at every shop in this workspace. Unknown products stay locked out of billing.</p></div>
-   <div class="card"><h3>Your catalog<span class="sp"></span><span class="small mute">${visibleProducts().length} products · ${own.length} added by you · rest from MuneemX master list</span></h3>
-   <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th>Barcode</th><th class="r">MRP</th><th class="r">Cost</th><th>Source</th></tr>${[...own, ...S.products.filter(p => !p.tenantId)].map(p => `<tr><td><div class="b small">${esc(pname(p))}</div><div class="small mute">${p.category}</div></td><td class="small">${ppack(p)}</td><td class="mono small">${p.barcode}</td><td class="r">${inr(p.mrp)}</td><td class="r">${inr(p.cost)}</td><td>${p.tenantId ? `<span class="badge br">${p.src === 'ai' ? 'AI enrolled' : 'Added'}</span>` : '<span class="badge">Master</span>'}</td></tr>`).join('')}</table></div></div></div>`;
+   <div class="card"><div class="row wrap" style="margin-bottom:12px"><h3 style="margin:0">Your catalog</h3><span class="sp"></span><input id="catq" placeholder="Search product or barcode" value="${esc(SUB.cq)}" style="max-width:240px"></div>
+   <div class="small mute" style="margin-bottom:8px">${visibleProducts().length} products · ${own.length} added by you · rest from MuneemX master list</div>
+   <div class="tbl"><table><tr><th></th><th>Product</th><th>Pack</th><th>Barcode</th><th class="r">MRP</th><th class="r">Cost</th><th>Source</th><th></th></tr>${list.map(p => `<tr style="${p.active === false ? 'opacity:.5' : ''}"><td style="width:46px">${pimg(p)}</td><td><div class="b small">${esc(pname(p))}</div><div class="small mute">${p.category}${p.active === false ? ' · <span>Hidden</span>' : ''}</div></td><td class="small">${ppack(p)}</td><td class="mono small">${p.barcode}</td><td class="r">${inr(p.mrp)}</td><td class="r">${inr(p.cost)}</td><td>${p.tenantId ? `<span class="badge br">${p.src === 'ai' ? 'AI enrolled' : 'Added'}</span>` : `<span class="badge">Master</span>${p.custom ? ' <span class="badge warn">Edited</span>' : ''}`}</td><td><button class="btn sm" data-edit="${p.id}">Edit</button></td></tr>`).join('')}</table></div></div></div>`;
   $$('[data-f]').forEach(i => i.oninput = i.onchange = () => { F[i.dataset.f] = i.value; if (i.dataset.f === 'pack' && PACK_ML[i.value]) { F.sizeMl = PACK_ML[i.value]; $('[data-f=sizeMl]').value = F.sizeMl; } });
+  $('#catq').oninput = e => { SUB.cq = e.target.value; INV.catalog(); const n = $('#catq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+  $$('[data-edit]').forEach(b => b.onclick = () => editProductModal(prodById(b.dataset.edit), () => INV.catalog()));
+  $('#cimg').onclick = () => pickImage(im => { F.img = im; INV.catalog(); });
+  if ($('#cimgx')) $('#cimgx').onclick = () => { F.img = null; INV.catalog(); };
   const msg = (h, k) => $('#cmsg').innerHTML = `<div class="flash ${k}" style="margin:0 0 12px">${h}</div>`;
   $('#cbc').onclick = () => fileInput(async f => { msg('Reading barcode…', 'info'); const c = await decodeBarcode(f); if (c) { F.barcode = c; INV.catalog(); msg('Barcode read: <span class="mono">' + esc(c) + '</span>', 'ok'); } else msg('No barcode found in that photo.', 'bad'); });
   $('#cai').onclick = () => fileInput(async f => {
     msg('<span class="spin dk"></span> AI is reading the label…', 'info');
+    if (!F.img) { try { F.img = await makeImage(f); } catch (e) { } }
     try {
       const [r, code] = await Promise.all([aiEnroll(f), decodeBarcode(f)]);
       Object.assign(F, { brand: r.brand || F.brand, name: r.name || F.name, category: CATS.includes(r.category) ? r.category : F.category, pack: PACKS.includes(r.pack) ? r.pack : F.pack, sizeMl: r.size_ml || F.sizeMl, mrp: r.mrp || F.mrp, barcode: code || r.barcode || F.barcode, _ai: true });
       INV.catalog(); msg(`AI filled the form — check it, add MRP if missing, then save. ${esc(r.note || '')}`, 'ok');
-    } catch (e) { msg(esc(errText(e)), 'bad'); }
+    } catch (e) { INV.catalog(); msg(esc(errText(e)), 'bad'); }
   });
   $('#csave').onclick = async () => {
     const F = SUB.f; if (!F.brand || !F.mrp) { msg('Brand and MRP are required.', 'bad'); return; }
     let bc = String(F.barcode || '').trim(); if (!bc) bc = ean('200' + String(Date.now()).slice(-9));
     if (visibleProducts().some(p => p.barcode === bc)) { msg('That barcode already exists in your database.', 'bad'); return; }
-    const p = await run(() => API.addProduct({ brand: F.brand.trim(), name: F.name.trim(), category: F.category, pack: F.pack, sizeMl: +F.sizeMl || 0, mrp: +F.mrp, cost: +F.cost || Math.round(F.mrp * .84), barcode: bc, src: F._ai ? 'ai' : 'manual' }), $('#csave'));
+    const p = await run(() => API.addProduct({ brand: F.brand.trim(), name: F.name.trim(), category: F.category, pack: F.pack, sizeMl: +F.sizeMl || 0, mrp: +F.mrp, cost: +F.cost || Math.round(F.mrp * .84), barcode: bc, src: F._ai ? 'ai' : 'manual' }, F.img), $('#csave'));
     if (p) { SUB.f = null; toast('Saved. Receive stock in “Stock inward” to start selling.', 'ok'); INV.catalog(); }
   };
 };
+function editProductModal(p, done) {
+  const own = !!p.tenantId; let img; // undefined = unchanged
+  const draw = () => {
+    const cur = img === undefined ? p.img : img === null ? null : img.url;
+    modal(`<h2>${ic('box', 18)} Edit product</h2>
+    ${own ? '' : `<div class="flash info" style="margin:0 0 12px">MuneemX master product: you can change the MRP, cost and photo for your shops. Name, pack and barcode stay as in the master list.</div>`}
+    <div class="row" style="margin-bottom:12px;align-items:center">${cur ? `<img class="pimg" src="${esc(cur)}" style="width:84px;height:84px">` : `<span class="pimg ph" style="width:84px;height:84px">${ic('cam', 24)}</span>`}
+     <div><div class="b small">Product photo <span class="mute">(optional)</span></div><div class="row" style="margin-top:6px"><button class="btn sm" id="eimg">${ic('plus')} ${cur ? 'Change photo' : 'Add photo'}</button>${cur ? '<button class="btn sm d" id="eimgx">Remove</button>' : ''}</div></div></div>
+    <div class="grid g2"><div><label class="f">Brand</label><input id="eb" value="${esc(p.brand)}" ${own ? '' : 'disabled'}></div><div><label class="f">Variant</label><input id="en" value="${esc(p.name)}" ${own ? '' : 'disabled'}></div>
+    <div><label class="f">Category</label><select id="ec" ${own ? '' : 'disabled'}>${CATS.map(c => `<option ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+    <div><label class="f">Pack</label><select id="ep" ${own ? '' : 'disabled'}>${PACKS.map(c => `<option ${p.pack === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+    <div><label class="f">Size (ml)</label><input id="es" type="number" value="${p.sizeMl}" ${own ? '' : 'disabled'}></div><div><label class="f">Barcode</label><input id="ebc" class="mono" value="${esc(p.barcode)}" ${own ? '' : 'disabled'}></div>
+    <div><label class="f">MRP ₹</label><input id="em" type="number" value="${p.mrp}"></div><div><label class="f">Cost ₹</label><input id="eco" type="number" value="${p.cost}"></div></div>
+    ${own ? `<label class="row small" style="margin-top:12px;font-weight:600"><input type="checkbox" id="eact" style="width:auto" ${p.active === false ? 'checked' : ''}> Hide this product (stop selling it)</label>` : ''}
+    <p class="small mute">New MRP applies to bills from now on. Old bills keep the price they were sold at.</p>
+    <div id="eerr" class="flash bad" style="display:none"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" id="ex">Cancel</button><button class="btn p" id="eok">Save changes</button></div>`);
+    if (own) $('#ep').onchange = e => { if (PACK_ML[e.target.value]) $('#es').value = PACK_ML[e.target.value]; };
+    $('#eimg').onclick = () => pickImage(im => { keep(); img = im; draw(); restore(); });
+    if ($('#eimgx')) $('#eimgx').onclick = () => { keep(); img = null; draw(); restore(); };
+    $('#ex').onclick = closeModal;
+    $('#eok').onclick = async () => {
+      const f = own ? { brand: $('#eb').value.trim(), name: $('#en').value.trim(), category: $('#ec').value, pack: $('#ep').value, sizeMl: +$('#es').value || 0, barcode: $('#ebc').value.trim(), mrp: +$('#em').value, cost: +$('#eco').value, active: !$('#eact').checked }
+        : { mrp: +$('#em').value, cost: +$('#eco').value };
+      const err = m => { $('#eerr').style.display = 'block'; $('#eerr').textContent = t(m); };
+      if (own && (!f.brand || !f.barcode)) return err('Brand and barcode are required.');
+      if (!(f.mrp > 0) || f.cost < 0) return err('Enter a valid MRP and cost.');
+      const ok = await run(async () => { await API.updateProduct(p, f, img); return true; }, $('#eok'));
+      if (ok) { closeModal(); toast(t('Product updated'), 'ok'); done && done(); }
+    };
+  };
+  let saved = null;
+  const keep = () => { saved = {}; ['eb', 'en', 'ec', 'ep', 'es', 'ebc', 'em', 'eco'].forEach(k => { const el = $('#' + k); if (el) saved[k] = el.value; }); if ($('#eact')) saved.eact = $('#eact').checked; };
+  const restore = () => { if (!saved) return; Object.entries(saved).forEach(([k, v]) => { const el = $('#' + k); if (!el) return; if (k === 'eact') el.checked = v; else el.value = v; }); };
+  draw();
+}
 
 /* ---------- EXPENSES ---------- */
 VIEWS.expenses = function () {

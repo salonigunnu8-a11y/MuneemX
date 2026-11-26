@@ -213,11 +213,18 @@ const DemoAPI = (() => {
       let n = 0; Object.entries(counts).forEach(([pid, c]) => { const v = c - stockOf(shopId, pid); if (v) { DB.stock[shopId][pid] = c; DB.moves.push({ id: uid('m'), shopId, ts: Date.now(), pid, qty: v, type: 'adjust', ref: 'Physical count', by: SES.userId }); n++; } });
       log('Stock count posted', `${shopById(shopId).name} · ${n} variances`); save(); return n;
     },
-    async addProduct(f) {
+    async addProduct(f, img) {
       if (visibleProducts().some(p => p.barcode === f.barcode)) throw new Error('That barcode already exists in your database.');
-      const p = { id: uid('p'), tenantId: SES.tenantId, ...f, w: .5 }; DB.products.push(p);
+      const p = { id: uid('p'), tenantId: SES.tenantId, ...f, img: img ? img.url : null, w: .5 }; DB.products.push(p);
       tShops().forEach(s => DB.stock[s.id][p.id] = DB.stock[s.id][p.id] || 0);
       log('Product enrolled', `${pname(p)} ${p.pack} · ${p.barcode}${p.src === 'ai' ? ' (AI)' : ''}`); save(); return p;
+    },
+    async updateProduct(p, f, img) {
+      if (role() === 'salesman') throw new Error('Only an owner or manager can edit the catalog');
+      if (p.tenantId && f.barcode !== p.barcode && visibleProducts().some(x => x.barcode === f.barcode && x.id !== p.id)) throw new Error('That barcode already exists in your database.');
+      const im = img === undefined ? p.img : img === null ? null : img.url;
+      if (p.tenantId) Object.assign(p, f, { img: im }); else Object.assign(p, { mrp: f.mrp, cost: f.cost, img: im, custom: true });
+      log('Product edited', `${pname(p)} ${p.pack} · MRP ₹${p.mrp}`); save(); return p;
     },
     async addExpense(e) { DB.expenses.push({ id: uid('e'), tenantId: SES.tenantId, ts: Date.now(), by: SES.userId, ...e }); log('Expense added', `${e.cat} ${inr(e.amount)}`); save(); },
     async setAttendance(memberId, day, st) { DB.attendance[memberId] = DB.attendance[memberId] || {}; DB.attendance[memberId][day] = st; save(); },

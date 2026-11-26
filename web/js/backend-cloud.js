@@ -33,7 +33,7 @@ const CloudAPI = (() => {
   const mTenant = t => ({ id: t.id, slug: t.slug, name: t.name, tagline: t.tagline, color: t.color, logo: t.logo, type: t.type, plan: t.plan, city: t.city, status: t.status, footer: t.footer, pol: t.policies });
   const mShop = s => ({ id: s.id, tenantId: s.tenant_id, name: s.name, code: s.code, address: s.address, license: s.license, upi: s.upi, seq: s.seq, lastHash: s.last_hash });
   const mMember = m => ({ id: m.id, tenantId: m.tenant_id, userId: m.user_id, name: m.name, username: m.username, role: m.role, shopId: m.shop_id, phone: m.phone, salary: +m.salary, commission: +m.commission, joined: ms(m.joined_at), active: m.active });
-  const mProduct = p => ({ id: p.id, tenantId: p.tenant_id, brand: p.brand, name: p.name, category: p.category, pack: p.pack, sizeMl: p.size_ml, mrp: +p.mrp, cost: +p.cost, barcode: p.barcode, w: +p.popularity, src: p.source, active: p.active });
+  const mProduct = p => ({ img: p.image_url || null, id: p.id, tenantId: p.tenant_id, brand: p.brand, name: p.name, category: p.category, pack: p.pack, sizeMl: p.size_ml, mrp: +p.mrp, cost: +p.cost, barcode: p.barcode, w: +p.popularity, src: p.source, active: p.active });
   const mSale = s => ({ id: s.id, no: s.bill_no, tenantId: s.tenant_id, shopId: s.shop_id, userId: s.member_id, ts: ms(s.ts), total: +s.total, cost: +s.cost, mode: s.mode, cash: +s.cash, upi: +s.upi, gross: +(s.gross ?? s.total), discount: +(s.discount || 0), credit: +(s.credit || 0), customerId: s.customer_id, upiRef: s.upi_ref, status: s.status, prev: s.prev_hash, hash: s.hash, voidBy: s.void_by, voidReason: s.void_reason, voidTs: ms(s.void_ts),
     items: (s.sale_items || []).sort((a, b) => a.id - b.id).map(i => ({ pid: i.product_id, qty: i.qty, price: +i.price, cost: +i.cost, m: i.method })) });
   const mMove = m => ({ id: m.id, shopId: m.shop_id, ts: ms(m.ts), pid: m.product_id, qty: m.qty, type: m.type, ref: m.ref, party: m.party, by: m.member_id });
@@ -54,7 +54,7 @@ const CloudAPI = (() => {
 
   async function loadWorkspace(tid) {
     const c = client(), from = sod(Date.now()) - LOAD_DAYS * DAY, fromIso = new Date(from).toISOString(), m0 = new Date(Math.min(from, monthStart())).toISOString();
-    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud, bcs, custs, cpay] = await Promise.all([
+    const [tn, shops, members, products, stock, sales, moves, expenses, att, adv, pay, closes, aud, bcs, custs, cpay, ovr] = await Promise.all([
       c.from('tenants').select('*').eq('id', tid).single().then(ok),
       c.from('shops').select('*').eq('tenant_id', tid).order('created_at').then(ok),
       c.from('members').select('*').eq('tenant_id', tid).order('joined_at').then(ok),
@@ -70,10 +70,12 @@ const CloudAPI = (() => {
       c.from('audit_log').select('*').eq('tenant_id', tid).order('ts', { ascending: false }).limit(300).then(ok).catch(() => []),
       all(() => c.from('product_barcodes').select('barcode,product_id').eq('tenant_id', tid)).catch(() => []),
       all(() => c.from('customers').select('id,name,phone').eq('tenant_id', tid)).catch(() => []),
-      all(() => c.from('credit_payments').select('*').eq('tenant_id', tid).gte('ts', fromIso).order('ts')).catch(() => [])]);
+      all(() => c.from('credit_payments').select('*').eq('tenant_id', tid).gte('ts', fromIso).order('ts')).catch(() => []),
+      all(() => c.from('product_overrides').select('*').eq('tenant_id', tid)).catch(() => [])]);
     const keepMe = S && S.me;
     S = emptyState(); S.me = keepMe; S.loadedFrom = from;
     S.tenants = [mTenant(tn)]; S.shops = shops.map(mShop); S.users = members.map(mMember); S.products = products.map(mProduct);
+    ovr.forEach(o => { const p = S.products.find(x => x.id === o.product_id); if (!p) return; if (o.mrp != null) p.mrp = +o.mrp; if (o.cost != null) p.cost = +o.cost; if (o.image_url) p.img = o.image_url; p.custom = true; });
     S.stock = stock; S.sales = sales; S.moves = moves.map(mMove); S.expenses = expenses.map(mExp);
     att.forEach(a => { (S.attendance[a.member_id] = S.attendance[a.member_id] || {})[a.day] = a.status; });
     S.advances = adv.map(a => ({ id: a.id, userId: a.member_id, ts: ms(a.ts), amount: +a.amount, note: a.note }));
@@ -195,9 +197,29 @@ const CloudAPI = (() => {
       Object.entries(counts).forEach(([pid, c]) => { const v = c - stockOf(shopId, pid); if (v) S.moves.push({ id: uid('m'), shopId, ts: Date.now(), pid, qty: v, type: 'adjust', ref: 'Physical count' }); });
       await refreshStock(); return n;
     },
-    async addProduct(f) {
-      const row = ok(await client().from('products').insert({ tenant_id: SES.tenantId, brand: f.brand, name: f.name, category: f.category, pack: f.pack, size_ml: f.sizeMl, mrp: f.mrp, cost: f.cost, barcode: f.barcode, source: f.src || 'manual', popularity: .5 }).select().single());
+    async uploadImage(blob) {
+      const path = `${SES.tenantId}/${uid('img')}.jpg`;
+      const { error } = await client().storage.from('product-images').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+      if (error) throw new Error('Photo upload failed: ' + error.message);
+      return client().storage.from('product-images').getPublicUrl(path).data.publicUrl;
+    },
+    async addProduct(f, img) {
+      const image_url = img ? await this.uploadImage(img.blob) : null;
+      const row = ok(await client().from('products').insert({ tenant_id: SES.tenantId, brand: f.brand, name: f.name, category: f.category, pack: f.pack, size_ml: f.sizeMl, mrp: f.mrp, cost: f.cost, barcode: f.barcode, source: f.src || 'manual', popularity: .5, image_url }).select().single());
       const p = mProduct(row); S.products.push(p); fire(client().rpc('log_audit', { p_action: 'Product enrolled', p_detail: `${pname(p)} ${p.pack} · ${p.barcode}` })); return p;
+    },
+    // img: undefined = keep photo, null = remove photo, {blob,url} = new photo
+    async updateProduct(p, f, img) {
+      const image_url = img === undefined ? p.img : img === null ? null : await this.uploadImage(img.blob);
+      if (p.tenantId) {
+        const row = ok(await client().from('products').update({ brand: f.brand, name: f.name, category: f.category, pack: f.pack, size_ml: f.sizeMl, mrp: f.mrp, cost: f.cost, barcode: f.barcode, active: f.active !== false, image_url }).eq('id', p.id).select().single());
+        Object.assign(p, mProduct(row));
+        fire(client().rpc('log_audit', { p_action: 'Product edited', p_detail: `${pname(p)} ${p.pack} · MRP ₹${p.mrp}` }));
+      } else {
+        ok(await client().rpc('set_product_override', { p_product: p.id, p_mrp: f.mrp, p_cost: f.cost, p_image: image_url || '' }));
+        Object.assign(p, { mrp: f.mrp, cost: f.cost, img: image_url, custom: true });
+      }
+      return p;
     },
     async addExpense(e) {
       const row = ok(await client().from('expenses').insert({ tenant_id: SES.tenantId, shop_id: e.shopId, category: e.cat, amount: e.amount, note: e.note, mode: e.mode, member_id: S.me.id }).select().single());

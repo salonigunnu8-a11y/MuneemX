@@ -183,3 +183,17 @@ function reminderText(c, shop) {
     ? `नमस्ते ${c.name} जी 🙏\n${tn.name}${shop ? ' (' + shop.name + ')' : ''} में आपका उधार *₹${Math.round(c.due)}* बाकी है।\nकृपया जल्दी भुगतान करें।${upi ? '\nUPI: ' + upi : ''}\nधन्यवाद`
     : `Namaste ${c.name} ji 🙏\n${tn.name}${shop ? ' (' + shop.name + ')' : ''} par aapka udhar *₹${Math.round(c.due)}* baaki hai.\nKripya jaldi bhugtan karein.${upi ? '\nUPI: ' + upi : ''}\nDhanyavaad`;
 }
+
+// ---- product photos ----
+async function makeImage(file, max = 480) {
+  const bmp = await createImageBitmap(file); const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', .82));
+  return { blob, url: c.toDataURL('image/jpeg', .72) };
+}
+function pickImage(cb) { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = async () => { if (i.files[0]) { try { cb(await makeImage(i.files[0])); } catch (e) { toast(t('Could not read that image'), 'bad'); } } }; i.click(); }
+function pimg(p, size = 36) {
+  const st = `width:${size}px;height:${size}px`;
+  return p && p.img ? `<img class="pimg" src="${esc(p.img)}" alt="" style="${st}" loading="lazy">` : `<span class="pimg ph" style="${st};font-size:${Math.round(size * .36)}px">${esc(ini(p ? p.brand : '?'))}</span>`;
+}

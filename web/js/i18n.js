@@ -39,6 +39,11 @@ const HI = {
   'Udhar given today': 'आज दिया उधार', 'Collected today': 'आज वसूला', 'Open Udhar →': 'उधार खोलें →', 'Discounts given': 'दी गई छूट',
   'Udhar given (not in drawer)': 'दिया उधार (दराज़ में नहीं)', 'Udhar collected in cash': 'नकद में वसूला उधार', 'Udhar collected by UPI': 'UPI से वसूला उधार',
   'Udhar bill': 'उधार बिल', 'Udhar received': 'उधार मिला', 'Udhar reminder sent': 'उधार रिमाइंडर भेजा', 'Discount given': 'छूट दी',
+  'Edit': 'बदलें', 'Edit product': 'प्रोडक्ट बदलें', 'Product photo': 'प्रोडक्ट फ़ोटो', 'Add photo': 'फ़ोटो जोड़ें', 'Change photo': 'फ़ोटो बदलें', 'Save changes': 'बदलाव सेव करें',
+  'Hide this product (stop selling it)': 'यह प्रोडक्ट छिपाएँ (बिक्री बंद करें)', 'Hidden': 'छिपा हुआ', 'Edited': 'बदला गया', 'Product updated': 'प्रोडक्ट अपडेट हुआ', 'Product edited': 'प्रोडक्ट बदला',
+  'MuneemX master product: you can change the MRP, cost and photo for your shops. Name, pack and barcode stay as in the master list.': 'MuneemX मास्टर प्रोडक्ट: आप अपनी दुकानों के लिए MRP, लागत और फ़ोटो बदल सकते हैं। नाम, पैक और बारकोड मास्टर सूची जैसे ही रहेंगे।',
+  'New MRP applies to bills from now on. Old bills keep the price they were sold at.': 'नया MRP अब से बनने वाले बिलों पर लागू होगा। पुराने बिल अपने दाम पर रहेंगे।',
+  'Brand and barcode are required.': 'ब्रांड और बारकोड ज़रूरी हैं।', 'Enter a valid MRP and cost.': 'सही MRP और लागत डालें।', 'Could not read that image': 'यह फ़ोटो पढ़ी नहीं जा सकी',
   // ---- sign-in ----
   'Sign in': 'लॉगिन करें', "Who's signing in?": 'कौन लॉगिन कर रहा है?', 'Workspace': 'वर्कस्पेस', 'PIN': 'पिन', 'Every demo PIN is': 'हर डेमो पिन है',
   'Every bottle scanned. Every rupee accounted.': 'हर बोतल स्कैन। हर रुपये का हिसाब।', 'Run every liquor shop on one platform.': 'हर शराब दुकान एक ही प्लेटफ़ॉर्म पर चलाएँ।',
