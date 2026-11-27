@@ -148,7 +148,7 @@ const DemoAPI = (() => {
     async init() {
       DB = lsGet(DEMO_KEY, null);
       if (!DB || DB.v !== 3 || Date.now() - DB.seededAt > 3 * DAY) { DB = demoSeed(); save(); }
-      DB.barcodes = DB.barcodes || {}; DB.customers = DB.customers || []; DB.creditPayments = DB.creditPayments || []; S = DB; S.me = null;
+      DB.barcodes = DB.barcodes || {}; DB.bcUnits = DB.bcUnits || {}; DB.customers = DB.customers || []; DB.creditPayments = DB.creditPayments || []; S = DB; S.me = null;
       const ses = loadSes();
       if (ses && DB.users.find(u => u.id === ses.userId)) { SES = ses; S.me = DB.users.find(u => u.id === ses.userId); return true; }
       return false;
@@ -204,10 +204,12 @@ const DemoAPI = (() => {
       log('Stock received', `${shopById(shopId).name} · ${ref} · ${sum(lines, l => l.q)} units`); save();
     },
     async transferStock(f, t, lines) {
-      for (const l of lines) if (stockOf(f, l.pid) < l.q) throw new Error(`Not enough ${pname(prodById(l.pid))} at ${shopById(f).name}`);
-      const ref = 'TRF-' + Date.now().toString().slice(-6);
-      lines.forEach(l => { DB.stock[f][l.pid] -= l.q; DB.stock[t][l.pid] = (DB.stock[t][l.pid] || 0) + l.q; DB.moves.push({ id: uid('m'), shopId: f, ts: Date.now(), pid: l.pid, qty: -l.q, type: 'transfer', ref, by: SES.userId }, { id: uid('m'), shopId: t, ts: Date.now(), pid: l.pid, qty: l.q, type: 'transfer', ref, by: SES.userId }); });
-      log('Stock transfer', `${ref} · ${shopById(f).name} → ${shopById(t).name}`); save(); return ref;
+      if (!(role() === 'owner' || (role() === 'manager' && S.me.shopId === f))) throw new Error('Only the owner, or the manager of the sending shop, can transfer stock');
+      for (const l of lines) if (stockOf(f, l.pid) < l.q) throw new Error(`Not enough stock at ${shopById(f).name}: ${pname(prodById(l.pid))} has only ${stockOf(f, l.pid)}`);
+      const d = new Date(), ref = 'TRF-' + String(d.getFullYear()).slice(2) + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+      const fn = shopById(f).name, tn = shopById(t).name;
+      lines.forEach(l => { DB.stock[f][l.pid] -= l.q; DB.stock[t][l.pid] = (DB.stock[t][l.pid] || 0) + l.q; DB.moves.push({ id: uid('m'), shopId: f, ts: Date.now(), pid: l.pid, qty: -l.q, type: 'transfer', ref, party: 'To ' + tn, by: SES.userId }, { id: uid('m'), shopId: t, ts: Date.now(), pid: l.pid, qty: l.q, type: 'transfer', ref, party: 'From ' + fn, by: SES.userId }); });
+      log('Stock transfer', `${ref} · ${fn} → ${tn} · ${sum(lines, l => l.q)} bottles`); save(); return ref;
     },
     async adjustStock(shopId, counts) {
       let n = 0; Object.entries(counts).forEach(([pid, c]) => { const v = c - stockOf(shopId, pid); if (v) { DB.stock[shopId][pid] = c; DB.moves.push({ id: uid('m'), shopId, ts: Date.now(), pid, qty: v, type: 'adjust', ref: 'Physical count', by: SES.userId }); n++; } });
@@ -249,11 +251,13 @@ const DemoAPI = (() => {
       DB.users.push(u); DB.attendance[u.id] = {}; log('Staff added', `${u.name} (${u.role})`); save();
     },
     async audit(a, d) { log(a, d); save(); },
-    async linkBarcode(pid, code, approverId, pin) {
+    async linkBarcode(pid, code, approverId, pin, units = 1) {
       if (role() === 'salesman' && !pinOk(approverId, pin, S.me.shopId)) throw new Error('Manager approval needed');
       const owner = visibleProducts().find(p => p.barcode === code && p.id !== pid); if (owner) throw new Error('This barcode already belongs to another product');
-      (DB.barcodes = DB.barcodes || {})[code] = pid; const p = prodById(pid); log('Barcode linked', `${code} → ${pname(p)} ${p.pack}`); save();
+      (DB.barcodes = DB.barcodes || {})[code] = pid; (DB.bcUnits = DB.bcUnits || {})[code] = units;
+      const p = prodById(pid); log('Barcode linked', `${code} → ${pname(p)} ${p.pack}${units > 1 ? ' (carton of ' + units + ')' : ''}`); save();
     },
+    async setMainShop(id) { DB.shops.filter(s => s.tenantId === SES.tenantId).forEach(s => s.isMain = s.id === id); log('Main store set', shopById(id).name); save(); },
     async creditSummary() {
       const m = {};
       DB.sales.filter(x => x.tenantId === SES.tenantId && x.status !== 'void' && x.credit > 0).forEach(x => { const r = m[x.customerId] = m[x.customerId] || { cr: 0, pd: 0, n: 0, last: 0 }; r.cr += x.credit; r.n++; r.last = Math.max(r.last, x.ts); });

@@ -216,6 +216,7 @@ create table if not exists public.audit_log (
 );
 create index if not exists audit_tenant_ts on public.audit_log (tenant_id, ts desc);
 
+
 -- >>> 20261123000002_security.sql
 -- =====================================================================
 -- MuneemX — helper functions & row-level security
@@ -387,6 +388,7 @@ create policy close_insert on public.day_closings for insert
 -- audit
 create policy audit_read on public.audit_log for select using (
   public.is_platform_admin() or (tenant_id = public.my_tenant() and public.my_role() in ('owner','manager')));
+
 
 -- >>> 20261123000003_functions.sql
 -- =====================================================================
@@ -783,6 +785,7 @@ do $$ begin
   end if;
 end $$;
 
+
 -- >>> 20261123000004_master_catalog.sql
 -- MuneemX master catalog (shared by every client; tenant_id = null).
 -- SAMPLE MRPs — MRPs differ by state; edit before going live.
@@ -856,6 +859,7 @@ insert into public.products (tenant_id, brand, name, category, pack, size_ml, mr
 (null, 'Sula', 'Shiraz Cabernet', 'Wine', 'Full', 750, 950, 817, '8901005305737', 0.24, 'master'),
 (null, 'Bacardi Breezer', 'Cranberry', 'RTD', 'Bottle', 275, 120, 103, '8901005384923', 0.8, 'master')
 on conflict do nothing;
+
 
 -- >>> 20261123000005_pin_hardening.sql
 -- =====================================================================
@@ -936,6 +940,7 @@ revoke execute on function public._guard_tenant() from public, anon, authenticat
 grant execute on function public.verify_approval(uuid, uuid, text) to authenticated;
 revoke execute on function public.verify_approval(uuid, uuid, text) from public, anon;
 
+
 -- >>> 20261124000006_barcode_links.sql
 -- =====================================================================
 -- MuneemX — linked barcodes
@@ -986,6 +991,7 @@ revoke execute on function public.link_barcode(uuid, text, uuid, text) from publ
 revoke execute on function public.unlink_barcode(text) from public, anon;
 grant execute on function public.link_barcode(uuid, text, uuid, text) to authenticated;
 grant execute on function public.unlink_barcode(text) to authenticated;
+
 
 -- >>> 20261125000007_discount_credit.sql
 -- =====================================================================
@@ -1182,6 +1188,7 @@ grant execute on function public.lock_sale(uuid, jsonb, text, numeric, text, uui
 grant execute on function public.credit_summary() to authenticated;
 grant execute on function public.receive_credit(uuid, numeric, text, uuid, text) to authenticated;
 
+
 -- >>> 20261126000008_catalog_edit.sql
 -- =====================================================================
 -- MuneemX — edit catalog + product photos
@@ -1309,6 +1316,7 @@ end $$;
 revoke execute on function public.set_product_override(uuid, numeric, numeric, text) from public, anon;
 grant execute on function public.set_product_override(uuid, numeric, numeric, text) to authenticated;
 
+
 -- >>> 20261126000009_product_images.sql
 -- =====================================================================
 -- MuneemX — product photo storage (public bucket, one folder per workspace)
@@ -1324,3 +1332,82 @@ create policy product_images_update on storage.objects for update to authenticat
   using (bucket_id = 'product-images' and (storage.foldername(name))[1] = public.my_tenant()::text and public.my_role() in ('owner','manager'));
 create policy product_images_delete on storage.objects for delete to authenticated
   using (bucket_id = 'product-images' and (storage.foldername(name))[1] = public.my_tenant()::text and public.my_role() in ('owner','manager'));
+
+
+-- >>> 20261127000010_cartons_transfers.sql
+-- =====================================================================
+-- MuneemX — cartons, main store, branch transfers
+-- * A linked barcode can stand for a carton of N bottles (units).
+-- * One shop can be marked as the main store / godown.
+-- * Transfers: owner, or the manager of the sending shop. Each side of a
+--   transfer records the other shop's name so registers read clearly.
+-- =====================================================================
+alter table public.product_barcodes add column if not exists units integer not null default 1 check (units between 1 and 500);
+alter table public.shops add column if not exists is_main boolean not null default false;
+
+drop function if exists public.link_barcode(uuid, text, uuid, text);
+create or replace function public.link_barcode(p_product uuid, p_barcode text, p_approver uuid default null, p_pin text default null, p_units integer default 1)
+returns void language plpgsql security definer set search_path = public as $$
+declare me public.members; code text := btrim(p_barcode); p public.products; u int := greatest(1, least(coalesce(p_units,1), 500));
+begin
+  me := public._require_member();
+  if me.role = 'salesman' then perform public._approve(me.tenant_id, me.shop_id, p_approver, p_pin); end if;
+  select * into p from public.products where id = p_product and (tenant_id is null or tenant_id = me.tenant_id);
+  if p.id is null then raise exception 'Product not found'; end if;
+  if exists (select 1 from public.products where barcode = code and (tenant_id is null or tenant_id = me.tenant_id) and id <> p_product) then
+    raise exception 'This barcode already belongs to another product';
+  end if;
+  insert into public.product_barcodes (tenant_id, product_id, barcode, member_id, units) values (me.tenant_id, p_product, code, me.id, u)
+  on conflict (tenant_id, barcode) do update set product_id = excluded.product_id, member_id = excluded.member_id, units = excluded.units, created_at = now();
+  perform public._audit(me.tenant_id, 'Barcode linked', code || ' → ' || p.brand || ' ' || p.name || ' ' || p.pack || case when u > 1 then ' (carton of ' || u || ')' else '' end);
+end $$;
+
+create or replace function public.set_main_shop(p_shop uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare me public.members;
+begin
+  me := public._require_member();
+  if me.role <> 'owner' then raise exception 'Only the owner can choose the main store'; end if;
+  if p_shop is not null and not exists (select 1 from public.shops where id = p_shop and tenant_id = me.tenant_id) then raise exception 'Shop not found'; end if;
+  update public.shops set is_main = (id = p_shop) where tenant_id = me.tenant_id;
+  perform public._audit(me.tenant_id, 'Main store set', coalesce((select name from public.shops where id = p_shop), 'none'));
+end $$;
+
+create or replace function public.transfer_stock(p_from uuid, p_to uuid, p_lines jsonb)
+returns text language plpgsql security definer set search_path = public as $$
+declare me public.members; ln jsonb; q int; pid uuid; have int; n int := 0; fname text; tname text;
+  ref text := 'TRF-' || to_char(now() at time zone 'Asia/Kolkata','YYMMDD-HH24MISS');
+begin
+  me := public._require_member();
+  if not (me.role = 'owner' or (me.role = 'manager' and me.shop_id = p_from)) then
+    raise exception 'Only the owner, or the manager of the sending shop, can transfer stock';
+  end if;
+  if p_from = p_to then raise exception 'Pick two different shops'; end if;
+  select name into fname from public.shops where id = p_from and tenant_id = me.tenant_id;
+  select name into tname from public.shops where id = p_to and tenant_id = me.tenant_id;
+  if fname is null or tname is null then raise exception 'Shop not found'; end if;
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    q := (ln->>'qty')::int; pid := (ln->>'product_id')::uuid;
+    if q is null or q <= 0 then continue; end if;
+    select qty into have from public.stock where shop_id = p_from and product_id = pid for update;
+    if coalesce(have,0) < q then
+      raise exception 'Not enough stock at %: % has only %', fname, (select brand || ' ' || pack from public.products where id = pid), coalesce(have,0);
+    end if;
+    update public.stock set qty = qty - q where shop_id = p_from and product_id = pid;
+    insert into public.stock (shop_id, product_id, tenant_id, qty) values (p_to, pid, me.tenant_id, q)
+      on conflict (shop_id, product_id) do update set qty = public.stock.qty + q;
+    insert into public.stock_moves (tenant_id, shop_id, product_id, qty, type, ref, party, member_id) values
+      (me.tenant_id, p_from, pid, -q, 'transfer', ref, 'To ' || tname, me.id),
+      (me.tenant_id, p_to, pid, q, 'transfer', ref, 'From ' || fname, me.id);
+    n := n + q;
+  end loop;
+  if n = 0 then raise exception 'Nothing to transfer'; end if;
+  perform public._audit(me.tenant_id, 'Stock transfer', ref || ' · ' || fname || ' → ' || tname || ' · ' || n || ' bottles');
+  return ref;
+end $$;
+
+revoke execute on function public.link_barcode(uuid, text, uuid, text, integer) from public, anon;
+revoke execute on function public.set_main_shop(uuid) from public, anon;
+grant execute on function public.link_barcode(uuid, text, uuid, text, integer) to authenticated;
+grant execute on function public.set_main_shop(uuid) to authenticated;
+

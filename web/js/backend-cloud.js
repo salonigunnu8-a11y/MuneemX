@@ -31,7 +31,7 @@ const CloudAPI = (() => {
 
   // ---- row mappers (database → app shape) ----
   const mTenant = t => ({ id: t.id, slug: t.slug, name: t.name, tagline: t.tagline, color: t.color, logo: t.logo, type: t.type, plan: t.plan, city: t.city, status: t.status, footer: t.footer, pol: t.policies });
-  const mShop = s => ({ id: s.id, tenantId: s.tenant_id, name: s.name, code: s.code, address: s.address, license: s.license, upi: s.upi, seq: s.seq, lastHash: s.last_hash });
+  const mShop = s => ({ id: s.id, tenantId: s.tenant_id, name: s.name, code: s.code, address: s.address, license: s.license, upi: s.upi, isMain: !!s.is_main, seq: s.seq, lastHash: s.last_hash });
   const mMember = m => ({ id: m.id, tenantId: m.tenant_id, userId: m.user_id, name: m.name, username: m.username, role: m.role, shopId: m.shop_id, phone: m.phone, salary: +m.salary, commission: +m.commission, joined: ms(m.joined_at), active: m.active });
   const mProduct = p => ({ img: p.image_url || null, id: p.id, tenantId: p.tenant_id, brand: p.brand, name: p.name, category: p.category, pack: p.pack, sizeMl: p.size_ml, mrp: +p.mrp, cost: +p.cost, barcode: p.barcode, w: +p.popularity, src: p.source, active: p.active });
   const mSale = s => ({ id: s.id, no: s.bill_no, tenantId: s.tenant_id, shopId: s.shop_id, userId: s.member_id, ts: ms(s.ts), total: +s.total, cost: +s.cost, mode: s.mode, cash: +s.cash, upi: +s.upi, gross: +(s.gross ?? s.total), discount: +(s.discount || 0), credit: +(s.credit || 0), customerId: s.customer_id, upiRef: s.upi_ref, status: s.status, prev: s.prev_hash, hash: s.hash, voidBy: s.void_by, voidReason: s.void_reason, voidTs: ms(s.void_ts),
@@ -68,7 +68,7 @@ const CloudAPI = (() => {
       c.from('payroll').select('*').eq('tenant_id', tid).then(ok).catch(() => []),
       c.from('day_closings').select('*').eq('tenant_id', tid).gte('day', fromIso.slice(0, 10)).then(ok).catch(() => []),
       c.from('audit_log').select('*').eq('tenant_id', tid).order('ts', { ascending: false }).limit(300).then(ok).catch(() => []),
-      all(() => c.from('product_barcodes').select('barcode,product_id').eq('tenant_id', tid)).catch(() => []),
+      all(() => c.from('product_barcodes').select('barcode,product_id,units').eq('tenant_id', tid)).catch(() => []),
       all(() => c.from('customers').select('id,name,phone').eq('tenant_id', tid)).catch(() => []),
       all(() => c.from('credit_payments').select('*').eq('tenant_id', tid).gte('ts', fromIso).order('ts')).catch(() => []),
       all(() => c.from('product_overrides').select('*').eq('tenant_id', tid)).catch(() => [])]);
@@ -82,7 +82,7 @@ const CloudAPI = (() => {
     S.payroll = pay.map(p => ({ id: p.id, userId: p.member_id, month: p.month, net: +p.net, ts: ms(p.ts), by: p.approved_by }));
     S.closings = closes.map(x => ({ shopId: x.shop_id, date: x.day, expected: +x.expected, counted: +x.counted, variance: +x.variance, ts: ms(x.ts), by: x.member_id }));
     S.audit = aud.map(a => ({ ts: ms(a.ts), by: a.member_id, t: a.tenant_id, a: a.action, d: a.detail }));
-    S.barcodes = {}; bcs.forEach(b => S.barcodes[b.barcode] = b.product_id);
+    S.barcodes = {}; S.bcUnits = {}; bcs.forEach(b => { S.barcodes[b.barcode] = b.product_id; S.bcUnits[b.barcode] = b.units || 1; });
     S.customers = custs; S.creditPayments = cpay.map(mCPay);
     if (S.me && S.me.tenantId === tid) S.me = S.users.find(u => u.id === S.me.id) || S.me;
     startRealtime(tid);
@@ -165,7 +165,12 @@ const CloudAPI = (() => {
       if (!S.loadedFrom || from >= S.loadedFrom) return;
       const older = await fetchSales(SES.tenantId, from, S.loadedFrom);
       const mv = (await all(() => client().from('stock_moves').select('*').eq('tenant_id', SES.tenantId).gte('ts', new Date(from).toISOString()).lt('ts', new Date(S.loadedFrom).toISOString()).order('ts')).catch(() => [])).map(mMove);
-      S.sales = [...older, ...S.sales]; S.moves = [...mv, ...S.moves]; S.loadedFrom = from;
+      const rng = q => q.eq('tenant_id', SES.tenantId).gte('ts', new Date(from).toISOString()).lt('ts', new Date(S.loadedFrom).toISOString()).order('ts');
+      const ex = (await all(() => rng(client().from('expenses').select('*'))).catch(() => [])).map(mExp);
+      const cp = (await all(() => rng(client().from('credit_payments').select('*'))).catch(() => [])).map(mCPay);
+      const known = new Set(S.expenses.map(e => e.id));
+      S.sales = [...older, ...S.sales]; S.moves = [...mv, ...S.moves]; S.expenses = [...ex.filter(e => !known.has(e.id)), ...S.expenses];
+      S.creditPayments = [...cp, ...(S.creditPayments || [])]; S.loadedFrom = from;
     },
     // returns a one-time approval token (string) or null; the token is then passed instead of the PIN
     async verifyApproval(shopId, approverId, pin) { return ok(await client().rpc('verify_approval', { p_shop: shopId || null, p_approver: approverId, p_pin: pin })) || null; },
@@ -190,7 +195,9 @@ const CloudAPI = (() => {
     },
     async transferStock(f, t, lines) {
       const ref = ok(await client().rpc('transfer_stock', { p_from: f, p_to: t, p_lines: lines.map(l => ({ product_id: l.pid, qty: l.q })) }));
-      lines.forEach(l => S.moves.push({ id: uid('m'), shopId: f, ts: Date.now(), pid: l.pid, qty: -l.q, type: 'transfer', ref }, { id: uid('m'), shopId: t, ts: Date.now(), pid: l.pid, qty: l.q, type: 'transfer', ref })); await refreshStock(); return ref;
+      const fn = shopById(f).name, tn = shopById(t).name, now = Date.now();
+      lines.forEach(l => S.moves.push({ id: uid('m'), shopId: f, ts: now, pid: l.pid, qty: -l.q, type: 'transfer', ref, party: 'To ' + tn, by: S.me.id }, { id: uid('m'), shopId: t, ts: now, pid: l.pid, qty: l.q, type: 'transfer', ref, party: 'From ' + fn, by: S.me.id }));
+      await refreshStock(); return ref;
     },
     async adjustStock(shopId, counts) {
       const n = ok(await client().rpc('adjust_stock', { p_shop: shopId, p_counts: Object.entries(counts).map(([pid, c]) => ({ product_id: pid, counted: c })) }));
@@ -260,10 +267,11 @@ const CloudAPI = (() => {
       S.users.push({ id, tenantId: SES.tenantId, userId: data.user.id, name: f.name, username: f.username, role: f.role, shopId: f.shopId, phone: f.phone, salary: f.salary, commission: f.commission, joined: Date.now(), active: true });
     },
     async audit(a, d) { await client().rpc('log_audit', { p_action: a, p_detail: d }); },
-    async linkBarcode(pid, code, approverId, token) {
-      ok(await client().rpc('link_barcode', { p_product: pid, p_barcode: code, p_approver: approverId || null, p_pin: token || null }));
-      (S.barcodes = S.barcodes || {})[code] = pid;
+    async linkBarcode(pid, code, approverId, token, units = 1) {
+      ok(await client().rpc('link_barcode', { p_product: pid, p_barcode: code, p_approver: approverId || null, p_pin: token || null, p_units: units }));
+      (S.barcodes = S.barcodes || {})[code] = pid; (S.bcUnits = S.bcUnits || {})[code] = units;
     },
+    async setMainShop(id) { ok(await client().rpc('set_main_shop', { p_shop: id })); S.shops.forEach(s => s.isMain = s.id === id); },
     async creditSummary() {
       return ok(await client().rpc('credit_summary')).map(r => ({ id: r.customer_id, name: r.name, phone: r.phone, credit: +r.credit_total, paid: +r.paid_total, due: +r.due, bills: r.bills, last: ms(r.last_bill) }));
     },

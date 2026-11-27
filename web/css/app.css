@@ -179,3 +179,9 @@ a.btn{text-decoration:none}
 .pimg{display:inline-grid;place-items:center;border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);flex:none;vertical-align:middle}
 .pimg.ph{background:var(--chip);color:var(--mute);font-weight:700}
 .bcimg{width:18px;height:18px;object-fit:contain;vertical-align:middle;margin-right:4px;border-radius:4px;background:#fff}
+
+#printarea{display:none}
+.btn.off{opacity:.5;pointer-events:auto}
+.prep{font:12px/1.4 Arial,sans-serif;color:#000}.prep h1{font-size:18px;margin:0 0 4px}.prep h2{font-size:14px;margin:16px 0 6px}.prep .pm{color:#555;font-size:11px}
+.prep table.pt{width:100%;border-collapse:collapse;margin-bottom:6px}.prep .pt th,.prep .pt td{border:1px solid #bbb;padding:3px 6px;text-align:left;font-size:11px}.prep .pt th{background:#eee}.prep .pt td.r{text-align:right}
+@media print{body.printing>*{display:none!important}body.printing #printarea{display:block!important;visibility:visible}body.printing #printarea *{visibility:visible}body.printing{background:#fff}@page{size:A4;margin:12mm}}

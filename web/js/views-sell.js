@@ -126,20 +126,20 @@ VIEWS.pos = function () {
 function flash(html, k) { const f = $('#flash'); if (f) f.innerHTML = `<div class="flash ${k}">${html}</div>`; }
 function posScan(code) {
   code = normCode(code); if (!code) return;
-  const p = findByBarcode(code);
-  if (!p) {
+  const hit = lookupCode(code);
+  if (!hit) {
     beep(false);
     flash(`${ic('lock', 14)} Sale locked — barcode <span class="mono">${esc(code)}</span> is not in your product database. <button class="btn sm" id="linkit" style="margin-left:6px">Link to a product</button>`, 'bad');
-    const b = $('#linkit'); if (b) b.onclick = () => linkBarcodeModal(code, p => { addToCart(p, 'scan'); const si = $('#scanin'); if (si) si.focus(); });
+    const b = $('#linkit'); if (b) b.onclick = () => linkBarcodeModal(code, (p, u) => { addToCart(p, 'scan', u); const si = $('#scanin'); if (si) si.focus(); });
     API.audit('Unknown barcode scanned', code).catch(() => { }); return;
   }
-  addToCart(p, 'scan');
+  addToCart(hit.p, 'scan', hit.units);
 }
-function addToCart(p, m) {
+function addToCart(p, m, n = 1) {
   const P = pol(), stock = stockOf(CART.shopId, p.id), inCart = sum(CART.lines.filter(l => l.pid === p.id), l => l.qty);
-  if (P.stockLock && inCart + 1 > stock) { beep(false); flash(`Stock lock — only ${stock} of ${esc(pname(p))} ${p.pack} in stock at this shop.`, 'bad'); return; }
-  const l = CART.lines.find(l => l.pid === p.id && l.m === m); if (l) l.qty++; else CART.lines.unshift({ pid: p.id, qty: 1, price: p.mrp, cost: p.cost, m });
-  beep(true); if (m === 'scan') flash(`✓ ${esc(pname(p))} · ${ppack(p)} · ${inr(p.mrp)}`, 'ok'); renderCart();
+  if (P.stockLock && inCart + n > stock) { beep(false); flash(`Stock lock — only ${stock} of ${esc(pname(p))} ${p.pack} in stock at this shop.`, 'bad'); return; }
+  const l = CART.lines.find(l => l.pid === p.id && l.m === m); if (l) l.qty += n; else CART.lines.unshift({ pid: p.id, qty: n, price: p.mrp, cost: p.cost, m });
+  beep(true); if (m === 'scan') flash(`✓ ${esc(pname(p))} · ${ppack(p)}${n > 1 ? ' × ' + n + ' (' + t('carton') + ')' : ''} · ${inr(p.mrp * n)}`, 'ok'); renderCart();
 }
 function cartCalc() {
   const gross = sum(CART.lines, l => l.qty * l.price);

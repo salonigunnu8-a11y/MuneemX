@@ -13,17 +13,29 @@ const normCode = s => String(s || '').replace(/[\u0000-\u001f\u007f]/g, '').trim
 
 // Find a product by barcode: catalog barcode, or a barcode linked by this workspace.
 // Also tolerates UPC-A (12 digits) vs EAN-13 (leading 0) differences between scanners.
-function findByBarcode(raw) {
+// Cartons: a linked barcode may stand for a carton of N bottles.
+const DEFAULT_CASE = { Full: 12, Half: 24, Quarter: 48, Pint: 12, Can: 24, Bottle: 24, Nip: 96 };
+// Look a scanned code up. Returns { p, units } (units = bottles in one scan: 1, or the carton size) or null.
+function lookupCode(raw) {
   const code = normCode(raw); if (!code) return null;
   const tries = [code]; if (/^\d{12}$/.test(code)) tries.push('0' + code); if (/^0\d{12}$/.test(code)) tries.push(code.slice(1));
   const vis = visibleProducts();
   for (const c of tries) {
-    const p = vis.find(p => p.barcode === c); if (p) return p;
-    const pid = (S.barcodes || {})[c]; if (pid) { const q = prodById(pid); if (q && vis.includes(q)) return q; }
+    const p = vis.find(p => p.barcode === c); if (p) return { p, units: 1 };
+    const pid = (S.barcodes || {})[c]; if (pid) { const q = prodById(pid); if (q && vis.includes(q)) return { p: q, units: (S.bcUnits || {})[c] || 1 }; }
   }
   return null;
 }
+function findByBarcode(raw) { const r = lookupCode(raw); return r ? r.p : null; }
 const linkedCodes = pid => Object.entries(S.barcodes || {}).filter(([, v]) => v === pid).map(([k]) => k);
+// bottles per carton for a product: its linked carton barcode, else the usual size for the pack
+function caseSize(p) {
+  if (!p) return 12;
+  const u = linkedCodes(p.id).map(c => (S.bcUnits || {})[c] || 1).filter(n => n > 1);
+  return u.length ? Math.max(...u) : (DEFAULT_CASE[p.pack] || 12);
+}
+// "3 ctn + 5" style label
+function cq(q, cs) { if (!cs || cs <= 1 || Math.abs(q) < cs) return String(q); const c = Math.trunc(q / cs), r = q - c * cs; return `${c} ${t('ctn')}${r ? ' + ' + r : ''}`; }
 
 /* ---------- 1. keyboard-wedge scanners anywhere on the page ---------- */
 (function () {
@@ -150,7 +162,7 @@ function stopStreams() {
 function closeCamera() { if (CAM) { CAM.stopped = true; stopStreams(); CAM = null; } }
 
 /* ---------- 3. link an unknown barcode to a product ---------- */
-function linkBarcodeModal(code, done) {
+function linkBarcodeModal(code, done, opts = {}) {
   code = normCode(code);
   modal(`<h2>${ic('scan', 18)} ${t('Link this barcode')}</h2>
    <p class="mute" style="margin-top:0">${t('Barcode')} <b class="mono">${esc(code)}</b> ${t('is not in your database yet. Pick the product this bottle is — every future scan of this barcode will bill it.')}</p>
@@ -161,12 +173,28 @@ function linkBarcodeModal(code, done) {
   q.oninput = () => {
     const w = q.value.toLowerCase().trim().split(/\s+/).filter(Boolean); if (!w.length) { $('#lbres').innerHTML = ''; return; }
     const r = visibleProducts().filter(p => w.every(x => (pname(p) + ' ' + p.pack + ' ' + p.sizeMl + ' ' + p.category).toLowerCase().includes(x))).slice(0, 10);
-    $('#lbres').innerHTML = r.map(p => `<button class="urow" style="margin-top:6px" data-lp="${p.id}"><div class="sp"><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)} · MRP ${inr(p.mrp)}</div></div></button>`).join('') || `<div class="small mute" style="padding:8px">${t('No match')}</div>`;
-    $$('[data-lp]').forEach(b => b.onclick = async () => {
-      const p = prodById(b.dataset.lp); let ap = null;
-      if (role() === 'salesman') { ap = await askPin(`${t('Link barcode')} ${code} → ${pname(p)} ${p.pack}`, S.me.shopId); if (!ap) return; }
-      const ok = await run(async () => { await API.linkBarcode(p.id, code, ap ? ap.user.id : null, ap ? ap.pin : null); return true; });
-      if (ok) { closeModal(); toast(`${t('Linked')}: ${code} → ${pname(p)} ${p.pack}`, 'ok'); done && done(p); }
-    });
+    $('#lbres').innerHTML = r.map(p => `<button class="urow" style="margin-top:6px" data-lp="${p.id}">${pimg(p, 34)}<div class="sp"><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)} · MRP ${inr(p.mrp)}</div></div></button>`).join('') || `<div class="small mute" style="padding:8px">${t('No match')}</div>`;
+    $$('[data-lp]').forEach(b => b.onclick = () => step2(prodById(b.dataset.lp)));
   };
+  function step2(p) {
+    let kind = opts.carton ? 'carton' : 'bottle';
+    const draw = () => {
+      modal(`<h2>${ic('scan', 18)} ${t('Link this barcode')}</h2>
+      <div class="row" style="margin-bottom:12px">${pimg(p, 44)}<div><div class="b">${esc(pname(p))}</div><div class="small mute">${ppack(p)} · <span class="mono">${esc(code)}</span></div></div></div>
+      <label class="f">${t('This barcode is on')}</label>
+      <div class="seg" style="width:100%"><button style="flex:1" data-k="bottle" class="${kind === 'bottle' ? 'on' : ''}">${t('One bottle')}</button><button style="flex:1" data-k="carton" class="${kind === 'carton' ? 'on' : ''}">${t('A carton / case')}</button></div>
+      ${kind === 'carton' ? `<div class="row" style="margin-top:10px"><label class="f" style="margin:0">${t('Bottles in one carton')}</label><input id="lbu" type="number" min="2" max="500" value="${caseSize(p)}" style="width:100px"></div><p class="small mute">${t('Each scan of this carton adds that many bottles.')}</p>` : ''}
+      <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn" id="lbx2">${t('Cancel')}</button><button class="btn p" id="lbok">${t('Link barcode')}</button></div>`);
+      $$('[data-k]').forEach(b => b.onclick = () => { kind = b.dataset.k; draw(); });
+      $('#lbx2').onclick = closeModal;
+      $('#lbok').onclick = async () => {
+        const units = kind === 'carton' ? Math.max(2, Math.min(500, Math.round(+$('#lbu').value || 0))) : 1;
+        let ap = null;
+        if (role() === 'salesman') { ap = await askPin(`${t('Link barcode')} ${code} → ${pname(p)} ${p.pack}`, S.me.shopId); if (!ap) return; }
+        const ok = await run(async () => { await API.linkBarcode(p.id, code, ap ? ap.user.id : null, ap ? ap.pin : null, units); return true; });
+        if (ok) { closeModal(); toast(`${t('Linked')}: ${code} → ${pname(p)} ${p.pack}${units > 1 ? ' × ' + units : ''}`, 'ok'); done && done(p, units); }
+      };
+    };
+    draw();
+  }
 }

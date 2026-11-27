@@ -7,7 +7,7 @@
 const INV = {};
 VIEWS.inventory = function () {
   SUB.tab = SUB.tab || 'stock';
-  const tabs = [['stock', 'Stock'], ['inward', 'Stock inward'], ...(tShops().length > 1 && role() === 'owner' ? [['transfer', 'Transfer']] : []), ['count', 'Physical count'], ['register', 'Daily register'], ['links', 'Link barcodes'], ['catalog', 'Product catalog']];
+  const tabs = [['stock', 'Stock'], ['inward', 'Stock inward'], ...(tShops().length > 1 && (role() === 'owner' || role() === 'manager') ? [['transfer', 'Transfer']] : []), ['count', 'Physical count'], ['register', 'Daily register'], ['links', 'Link barcodes'], ['catalog', 'Product catalog']];
   $('#view').innerHTML = `<div class="tabs">${tabs.map(([k, t]) => `<a data-t="${k}" class="${SUB.tab === k ? 'on' : ''}">${t}</a>`).join('')}</div><div id="inv"></div>`;
   $$('[data-t]').forEach(a => a.onclick = () => { SUB = { tab: a.dataset.t }; VIEWS.inventory(); });
   INV[SUB.tab]();
@@ -27,54 +27,98 @@ INV.stock = function () {
   $$('[data-edit]').forEach(b => b.onclick = () => editProductModal(prodById(b.dataset.edit), () => INV.stock()));
   $('#icsv').onclick = () => copyText(['Product,Pack,Size ml,Barcode,MRP,' + ids.map(id => shopById(id).name).join(',') + ',Total', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.p.barcode},${r.p.mrp},${r.per.join(',')},${r.q}`)].join('\n'));
 };
-function productPicker(sel, onPick) {
-  const el = $(sel); el.innerHTML = `<div class="row"><input placeholder="Scan barcode or search product" class="pp-in"><button class="btn" type="button" data-ppcam>${ic('cam')}</button></div><div class="pp-res"></div>`;
+// onPick(p, units): units = bottles from a scan (1 or carton size); null when picked from search
+function productPicker(sel, onPick, opts = {}) {
+  const el = $(sel); el.innerHTML = `<div class="row"><input placeholder="Scan carton / bottle barcode or search" class="pp-in"><button class="btn" type="button" data-ppcam>${ic('cam')}</button></div><div class="pp-res"></div>`;
   const inp = el.querySelector('.pp-in'), res = el.querySelector('.pp-res');
-  const byCode = code => { code = normCode(code); const p = findByBarcode(code); if (p) { onPick(p); beep(true); } else { beep(false); linkBarcodeModal(code, onPick); } };
+  const byCode = code => { code = normCode(code); const h = lookupCode(code); if (h) { beep(true); onPick(h.p, h.units); } else { beep(false); linkBarcodeModal(code, (p, u) => onPick(p, u), { carton: opts.carton }); } };
   SCAN_HANDLER = byCode;
   el.querySelector('[data-ppcam]').onclick = () => openCamera(byCode);
   inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) { e.preventDefault(); const v = inp.value; inp.value = ''; res.innerHTML = ''; byCode(v); } };
+  autoSubmitBox(inp, v => { res.innerHTML = ''; byCode(v); });
   inp.oninput = () => {
     const q = inp.value.toLowerCase().trim(); if (q.length < 2 || /^\d+$/.test(q)) { res.innerHTML = ''; return; } const w = q.split(/\s+/);
     const r = visibleProducts().filter(p => w.every(x => (pname(p) + ' ' + p.pack + ' ' + p.sizeMl).toLowerCase().includes(x))).slice(0, 6);
-    res.innerHTML = r.map(p => `<button class="urow" style="margin-top:6px" data-pp="${p.id}"><div class="sp"><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)} · ${p.barcode}</div></div></button>`).join('');
-    res.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => onPick(prodById(b.dataset.pp)));
+    res.innerHTML = r.map(p => `<button class="urow" style="margin-top:6px" data-pp="${p.id}">${pimg(p, 30)}<div class="sp"><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)} · ${t('carton')} ${caseSize(p)}</div></div></button>`).join('');
+    res.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => { inp.value = ''; res.innerHTML = ''; onPick(prodById(b.dataset.pp), null); });
   };
 }
-function invShopSel(id, label, cur) { const list = role() === 'owner' ? tShops().map(s => s.id) : [S.me.shopId]; const v = cur || (scope().length === 1 ? scope()[0] : list[0]); return `<div><label class="f">${label || 'Shop'}</label><select id="${id}">${list.map(x => `<option value="${x}" ${x === v ? 'selected' : ''}>${esc(shopById(x).name)}</option>`).join('')}</select></div>`; }
+function invShopSel(id, label, cur, list) { list = list || (role() === 'owner' ? tShops().map(s => s.id) : [S.me.shopId]); const v = cur || (scope().length === 1 && list.includes(scope()[0]) ? scope()[0] : list[0]); return `<div><label class="f">${label || 'Shop'}</label><select id="${id}">${list.map(x => `<option value="${x}" ${x === v ? 'selected' : ''}>${esc(shopById(x).name)}${shopById(x).isMain ? ' ★' : ''}</option>`).join('')}</select></div>`; }
+const mainShop = () => tShops().find(s => s.isMain);
+// editable lines: cartons + loose bottles
+function linesTable(lines, prefix, avail) {
+  return `<div class="tbl" style="border:0"><table><tr><th>Product</th><th class="r">${t('Per carton')}</th><th class="r">${t('Cartons')}</th><th class="r">${t('+ Bottles')}</th><th class="r">${t('Total bottles')}</th>${avail ? `<th class="r">${t('Available')}</th>` : ''}<th></th></tr>
+  ${lines.map((l, i) => { const p = prodById(l.pid), cs = caseSize(p), c = Math.floor(l.q / cs), r = l.q - c * cs, have = avail ? avail(l.pid) : null;
+    return `<tr><td><div class="row" style="gap:8px">${pimg(p, 30)}<div><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)}</div></div></div></td>
+    <td class="r small">${cs}</td><td class="r"><input type="number" min="0" value="${c}" data-${prefix}c="${i}" style="width:70px;text-align:right"></td>
+    <td class="r"><input type="number" min="0" value="${r}" data-${prefix}b="${i}" style="width:70px;text-align:right"></td>
+    <td class="r b">${l.q}</td>${avail ? `<td class="r"><span class="badge ${have < l.q ? 'bad' : 'ok'}">${have}</span></td>` : ''}
+    <td class="r" style="white-space:nowrap"><button class="btn sm" data-${prefix}add="${i}">+1 ${t('ctn')}</button> <button class="btn sm d" data-${prefix}x="${i}">✕</button></td></tr>`; }).join('')}</table></div>`;
+}
+function wireLines(lines, prefix, redraw) {
+  const set = i => { const p = prodById(lines[i].pid), cs = caseSize(p); const c = Math.max(0, +$(`[data-${prefix}c="${i}"]`).value || 0), b = Math.max(0, +$(`[data-${prefix}b="${i}"]`).value || 0); lines[i].q = c * cs + b; };
+  $$(`[data-${prefix}c],[data-${prefix}b]`).forEach(x => x.onchange = () => { set(+(x.dataset[prefix + 'c'] ?? x.dataset[prefix + 'b'])); if (lines[+(x.dataset[prefix + 'c'] ?? x.dataset[prefix + 'b'])].q <= 0) lines.splice(+(x.dataset[prefix + 'c'] ?? x.dataset[prefix + 'b']), 1); setTimeout(redraw, 0); });
+  $$(`[data-${prefix}add]`).forEach(b => b.onclick = () => { const l = lines[+b.dataset[prefix + 'add']]; l.q += caseSize(prodById(l.pid)); redraw(); });
+  $$(`[data-${prefix}x]`).forEach(b => b.onclick = () => { lines.splice(+b.dataset[prefix + 'x'], 1); redraw(); });
+}
+function addLine(lines, p, units) { const n = units == null ? caseSize(p) : units; const l = lines.find(l => l.pid === p.id); if (l) l.q += n; else lines.unshift({ pid: p.id, q: n }); return n; }
+
 INV.inward = function () {
-  SUB.lines = SUB.lines || [];
+  SUB.lines = SUB.lines || []; SUB.log = SUB.log || [];
+  if (SUB.shop == null) SUB.shop = (mainShop() && (role() === 'owner') ? mainShop().id : null);
   const hist = S.moves.filter(m => m.type === 'inward' && scope().includes(m.shopId)); const byRef = {};
-  hist.forEach(m => { const k = m.shopId + '|' + m.ref; byRef[k] = byRef[k] || { ref: m.ref, shop: m.shopId, ts: m.ts, party: m.party, q: 0, v: 0 }; byRef[k].q += m.qty; byRef[k].v += m.qty * (prodById(m.pid)?.cost || 0); });
-  $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>Receive stock</h3>
+  hist.forEach(m => { const k = m.shopId + '|' + m.ref; byRef[k] = byRef[k] || { ref: m.ref, shop: m.shopId, ts: m.ts, party: m.party, q: 0, v: 0 }; byRef[k].q += m.qty; byRef[k].v += m.qty * (prodById(m.pid)?.cost || 0); byRef[k].ts = Math.max(byRef[k].ts, m.ts); });
+  const tq = sum(SUB.lines, l => l.q), tc = sum(SUB.lines, l => Math.floor(l.q / caseSize(prodById(l.pid))));
+  $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>${ic('box', 16)} Receive stock</h3>
    <div class="grid">${invShopSel('ish', 'Shop', SUB.shop)}<div><label class="f">Supplier / depot</label><input id="isup" value="${esc(SUB.sup || '')}" placeholder="e.g. State Beverages Depot"></div><div><label class="f">Invoice / permit no.</label><input id="iinv" value="${esc(SUB.inv || '')}" placeholder="e.g. TP/2026/88123"></div>
-   <div><label class="f">Add products (scan cases or search)</label><div id="ipick"></div></div></div></div>
-   <div class="card"><h3>Lines<span class="sp"></span><span class="small mute">${sum(SUB.lines, l => l.q)} units · ${inr(sum(SUB.lines, l => l.q * prodById(l.pid).cost))} at cost</span></h3>
-   ${SUB.lines.length ? `<table><tr><th>Product</th><th class="r">Qty (bottles)</th><th></th></tr>${SUB.lines.map((l, i) => { const p = prodById(l.pid); return `<tr><td><div class="b small">${esc(pname(p))}</div><div class="small mute">${ppack(p)}</div></td><td class="r"><input type="number" min="1" value="${l.q}" data-iq="${i}" style="width:100px;text-align:right"></td><td><button class="btn sm d" data-ix="${i}">Remove</button></td></tr>`; }).join('')}</table>
-   <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="isave">Receive into stock</button></div>` : '<div class="empty">Scan or search products to add them</div>'}
+   <div><label class="f">Scan cartons or bottles</label><div id="ipick"></div></div>
+   <label class="row small opt" style="font-weight:600;margin:0"><input type="checkbox" id="iinst" style="width:auto" ${SUB.instant ? 'checked' : ''}> <span>${t('Instant mode: each scan goes straight into stock')}</span></label>
+   <p class="small mute" style="margin:0">${t('A carton barcode adds the whole carton. A bottle barcode adds one bottle. Search adds one carton. New carton barcodes are linked once in Inventory → Link barcodes.')}</p></div></div>
+   <div class="card">${SUB.instant ? `<h3>${t('Scanned into stock')}<span class="sp"></span><span class="small mute">${sum(SUB.log, x => x.q)} ${t('bottles')}</span></h3>
+     ${SUB.log.length ? `<table>${SUB.log.slice(0, 30).map(x => `<tr><td class="small mute">${tm(x.ts)}</td><td class="small b">${esc(pname(prodById(x.pid)))} · ${prodById(x.pid).pack}</td><td class="r"><span class="badge ok">+${cq(x.q, caseSize(prodById(x.pid)))}</span></td></tr>`).join('')}</table>` : `<div class="empty">${ic('scan', 26)}<div>${t('Scan a carton to add it to stock')}</div></div>`}`
+   : `<h3>Lines<span class="sp"></span><span class="small mute">${tc} ${t('cartons')} · ${tq} ${t('bottles')} · ${inr(sum(SUB.lines, l => l.q * prodById(l.pid).cost))} at cost</span></h3>
+   ${SUB.lines.length ? linesTable(SUB.lines, 'i') + `<div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="isave">${ic('plus')} Receive into stock</button></div>` : '<div class="empty">Scan or search products to add them</div>'}`}
    <h3 style="margin-top:18px">Recent receipts</h3><div class="tbl" style="max-height:240px"><table><tr><th>Date</th><th>Shop</th><th>Ref</th><th>Supplier</th><th class="r">Units</th><th class="r">Value</th></tr>${Object.values(byRef).sort((a, b) => b.ts - a.ts).slice(0, 12).map(r => `<tr><td class="small">${dtm(r.ts)}</td><td class="small">${esc(shopById(r.shop)?.name)}</td><td class="mono small">${esc(r.ref)}</td><td class="small">${esc(r.party || '')}</td><td class="r">${r.q}</td><td class="r">${inr(r.v)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">None yet</td></tr>'}</table></div></div></div>`;
   const keep = () => { SUB.sup = $('#isup').value; SUB.inv = $('#iinv').value; SUB.shop = $('#ish').value; };
-  productPicker('#ipick', p => { keep(); const l = SUB.lines.find(l => l.pid === p.id); const def = p.pack === 'Quarter' ? 48 : p.pack === 'Half' ? 24 : 12; if (l) l.q += def; else SUB.lines.push({ pid: p.id, q: def }); INV.inward(); const i = $('.pp-in'); if (i) i.focus(); });
-  $$('[data-iq]').forEach(i => i.onchange = () => { SUB.lines[+i.dataset.iq].q = Math.max(1, +i.value || 1); });
-  $$('[data-ix]').forEach(b => b.onclick = () => { keep(); SUB.lines.splice(+b.dataset.ix, 1); INV.inward(); });
+  $('#iinst').onchange = e => { keep(); SUB.instant = e.target.checked; INV.inward(); };
+  productPicker('#ipick', async (p, units) => {
+    keep();
+    if (SUB.instant) {
+      const n = units == null ? caseSize(p) : units, ref = SUB.inv || ('SCAN-' + dk(Date.now()));
+      const ok = await run(async () => { await API.receiveStock(SUB.shop, ref, SUB.sup, [{ pid: p.id, q: n }]); return true; });
+      if (ok) { SUB.log.unshift({ pid: p.id, q: n, ts: Date.now() }); toast(`+${n} ${pname(p)} ${p.pack}`, 'ok'); }
+    } else addLine(SUB.lines, p, units);
+    INV.inward(); const i = $('.pp-in'); if (i) i.focus();
+  }, { carton: true });
+  if (!SUB.instant && SUB.lines.length) wireLines(SUB.lines, 'i', () => { keep(); INV.inward(); });
   if ($('#isave')) $('#isave').onclick = async () => {
     keep(); const ref = SUB.inv || ('GRN-' + Date.now().toString().slice(-6));
     const ok = await run(async () => { await API.receiveStock(SUB.shop, ref, SUB.sup, SUB.lines); return true; }, $('#isave'));
-    if (ok) { toast('Stock received', 'ok'); SUB = { tab: 'inward', shop: SUB.shop, sup: SUB.sup }; INV.inward(); }
+    if (ok) { toast(`${t('Stock received')} · ${tq} ${t('bottles')}`, 'ok'); SUB = { tab: 'inward', shop: SUB.shop, sup: SUB.sup }; INV.inward(); }
   };
 };
 INV.transfer = function () {
   SUB.lines = SUB.lines || [];
-  $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>Move stock between shops</h3><div class="grid">${invShopSel('tfrom', 'From shop', SUB.from)}${invShopSel('tto', 'To shop', SUB.to || (tShops()[1] || {}).id)}<div><label class="f">Add products</label><div id="tpick"></div></div></div></div>
-  <div class="card"><h3>Transfer lines</h3>${SUB.lines.length ? `<table><tr><th>Product</th><th class="r">Qty</th><th></th></tr>${SUB.lines.map((l, i) => { const p = prodById(l.pid); return `<tr><td class="small b">${esc(pname(p))} · ${ppack(p)}</td><td class="r"><input type="number" min="1" value="${l.q}" data-tq="${i}" style="width:90px;text-align:right"></td><td><button class="btn sm d" data-tx="${i}">Remove</button></td></tr>`; }).join('')}</table><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="tsave">Transfer</button></div>` : '<div class="empty">Add products to move</div>'}</div></div>`;
-  const keep = () => { SUB.from = $('#tfrom').value; SUB.to = $('#tto').value; };
-  productPicker('#tpick', p => { keep(); SUB.lines.push({ pid: p.id, q: 6 }); INV.transfer(); });
-  $$('[data-tq]').forEach(i => i.onchange = () => { SUB.lines[+i.dataset.tq].q = Math.max(1, +i.value || 1); });
-  $$('[data-tx]').forEach(b => b.onclick = () => { keep(); SUB.lines.splice(+b.dataset.tx, 1); INV.transfer(); });
+  const fromList = role() === 'owner' ? tShops().map(s => s.id) : [S.me.shopId];
+  if (!SUB.from) SUB.from = role() === 'owner' ? (mainShop() || tShops()[0]).id : S.me.shopId;
+  const toList = tShops().map(s => s.id).filter(id => id !== SUB.from);
+  if (!SUB.to || !toList.includes(SUB.to)) SUB.to = toList[0];
+  const tq = sum(SUB.lines, l => l.q), short = SUB.lines.some(l => stockOf(SUB.from, l.pid) < l.q);
+  const groups = {}; S.moves.filter(m => m.type === 'transfer' && m.qty < 0 && (role() === 'owner' || m.shopId === S.me.shopId || (m.party || '').endsWith(shopById(S.me.shopId)?.name || '~'))).forEach(m => { const g = groups[m.ref] = groups[m.ref] || { ref: m.ref, ts: m.ts, from: m.shopId, to: m.party, q: 0, n: 0 }; g.q -= m.qty; g.n++; });
+  $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>${ic('box', 16)} Move stock between shops</h3><div class="grid">
+   ${invShopSel('tfrom', 'From shop', SUB.from, fromList)}${invShopSel('tto', 'To shop', SUB.to, toList)}
+   <div><label class="f">Scan cartons or bottles</label><div id="tpick"></div></div>
+   <p class="small mute" style="margin:0">${t('Stock is taken out of the sending shop and added to the receiving shop in one step. Both shops see it in their Daily register and in Reports → Stock movements.')}</p></div></div>
+  <div class="card"><h3>Transfer lines<span class="sp"></span><span class="small mute">${tq} ${t('bottles')}</span></h3>${SUB.lines.length ? linesTable(SUB.lines, 't', pid => stockOf(SUB.from, pid)) + `${short ? `<div class="flash bad">${t('Some lines are more than the stock at the sending shop.')}</div>` : ''}<div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn p" id="tsave" ${short ? 'disabled' : ''}>${t('Transfer')} ${tq} ${t('bottles')} → ${esc(shopById(SUB.to)?.name || '')}</button></div>` : '<div class="empty">Add products to move</div>'}
+   <h3 style="margin-top:18px">${t('Recent transfers')}</h3><div class="tbl" style="max-height:240px"><table><tr><th>Date</th><th>Ref</th><th>From</th><th>To</th><th class="r">${t('Products')}</th><th class="r">${t('Bottles')}</th></tr>${Object.values(groups).sort((a, b) => b.ts - a.ts).slice(0, 15).map(g => `<tr><td class="small">${dtm(g.ts)}</td><td class="mono small">${esc(g.ref)}</td><td class="small">${esc(shopById(g.from)?.name || '')}</td><td class="small">${esc((g.to || '').replace(/^To /, ''))}</td><td class="r">${g.n}</td><td class="r b">${g.q}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">None yet</td></tr>'}</table></div></div></div>`;
+  $('#tfrom').onchange = e => { SUB.from = e.target.value; SUB.to = null; INV.transfer(); };
+  $('#tto').onchange = e => { SUB.to = e.target.value; INV.transfer(); };
+  productPicker('#tpick', (p, units) => { addLine(SUB.lines, p, units); INV.transfer(); const i = $('.pp-in'); if (i) i.focus(); }, { carton: true });
+  if (SUB.lines.length) wireLines(SUB.lines, 't', () => INV.transfer());
   if ($('#tsave')) $('#tsave').onclick = async () => {
-    keep(); if (SUB.from === SUB.to) { toast('Pick two different shops', 'bad'); return; }
+    if (SUB.from === SUB.to) { toast('Pick two different shops', 'bad'); return; }
     const ref = await run(() => API.transferStock(SUB.from, SUB.to, SUB.lines), $('#tsave'));
-    if (ref) { toast('Transferred · ' + ref, 'ok'); SUB = { tab: 'transfer', from: SUB.from, to: SUB.to }; INV.transfer(); }
+    if (ref) { toast(`${t('Transferred')} · ${ref}`, 'ok'); SUB = { tab: 'transfer', from: SUB.from, to: SUB.to }; INV.transfer(); }
   };
 };
 INV.count = function () {
@@ -92,32 +136,39 @@ INV.count = function () {
     if (n !== undefined) { toast(`${n} adjustment(s) posted`, 'ok'); SUB = { tab: 'count', shop: sh, cat: SUB.cat }; INV.count(); }
   };
 };
+// per-product movement for a shop between [d0, d1): opening, inward, transfers in/out, adjustments, sold, closing
+function stockRegister(sh, d0, d1) {
+  const sales = S.sales.filter(s => s.shopId === sh && s.status !== 'void'), moves = S.moves.filter(m => m.shopId === sh);
+  return visibleProducts().map(p => {
+    const cur = stockOf(sh, p.id), mv = moves.filter(m => m.pid === p.id), sl = sales.map(s => ({ ts: s.ts, q: sum(s.items.filter(i => i.pid === p.id), i => i.qty) })).filter(x => x.q);
+    const after = t => ({ mv: sum(mv.filter(m => m.ts >= t), m => m.qty), sold: sum(sl.filter(x => x.ts >= t), x => x.q) });
+    const a1 = after(d1), a0 = after(d0), inn = mv.filter(m => m.ts >= d0 && m.ts < d1);
+    const r = { p, open: cur - a0.mv + a0.sold, close: cur - a1.mv + a1.sold, sold: a0.sold - a1.sold,
+      inw: sum(inn.filter(m => m.type === 'inward' || m.type === 'opening'), m => m.qty), tin: sum(inn.filter(m => m.type === 'transfer' && m.qty > 0), m => m.qty),
+      tout: -sum(inn.filter(m => m.type === 'transfer' && m.qty < 0), m => m.qty), adj: sum(inn.filter(m => m.type === 'adjust'), m => m.qty) };
+    return r;
+  }).filter(r => r.open || r.inw || r.tin || r.tout || r.adj || r.sold || r.close);
+}
 INV.register = function () {
   SUB.date = SUB.date || dk(Date.now()); const sh = SUB.shop || scope()[0];
   const d0 = d0of(SUB.date), d1 = d0 + DAY;
   if (S.loadedFrom && d0 < S.loadedFrom) { $('#inv').innerHTML = '<div class="card empty"><span class="spin dk"></span> Loading…</div>'; API.ensureRange(d0).then(() => INV.register(), e => toast(errText(e), 'bad')); return; }
-  const shopSales = S.sales.filter(s => s.shopId === sh && s.status !== 'void'), shopMoves = S.moves.filter(m => m.shopId === sh);
-  const rows = visibleProducts().map(p => {
-    const cur = stockOf(sh, p.id);
-    const after = t => ({ mv: sum(shopMoves.filter(m => m.pid === p.id && m.ts >= t), m => m.qty), sold: sum(shopSales.filter(s => s.ts >= t), s => sum(s.items.filter(i => i.pid === p.id), i => i.qty)) });
-    const a1 = after(d1), a0 = after(d0); const close = cur - a1.mv + a1.sold, open = cur - a0.mv + a0.sold;
-    return { p, open, inw: a0.mv - a1.mv, sold: a0.sold - a1.sold, close };
-  }).filter(r => r.open || r.inw || r.sold || r.close);
-  $('#inv').innerHTML = `<div class="card"><h3>Daily stock register<span class="sp"></span><span class="small mute">Opening + received − sold = closing, per product</span></h3>
+  const rows = stockRegister(sh, d0, d1), T = k => sum(rows, r => r[k]);
+  $('#inv').innerHTML = `<div class="card"><h3>Daily stock register<span class="sp"></span><span class="small mute">${t('Opening + received + transfer in − transfer out ± adjust − sold = closing')}</span></h3>
   <div class="row wrap" style="margin-bottom:12px"><input type="date" id="rd" value="${SUB.date}" style="width:auto">${role() === 'owner' ? `<select id="rsh" style="width:auto">${tShops().map(s => `<option value="${s.id}" ${s.id === sh ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}<span class="sp"></span><button class="btn" id="rcsv">${ic('copy')} Copy CSV</button></div>
-  <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th class="r">Opening</th><th class="r">Received</th><th class="r">Sold</th><th class="r">Closing</th><th class="r">Sales ₹</th></tr>${rows.map(r => `<tr><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td class="r">${r.open}</td><td class="r">${r.inw || ''}</td><td class="r b">${r.sold || ''}</td><td class="r">${r.close}</td><td class="r">${r.sold ? inr(r.sold * r.p.mrp) : ''}</td></tr>`).join('')}
-  <tr style="background:var(--soft)"><td class="b">Total</td><td></td><td class="r b">${sum(rows, r => r.open)}</td><td class="r b">${sum(rows, r => r.inw)}</td><td class="r b">${sum(rows, r => r.sold)}</td><td class="r b">${sum(rows, r => r.close)}</td><td class="r b">${inr(sum(rows, r => r.sold * r.p.mrp))}</td></tr></table></div></div>`;
+  <div class="tbl"><table><tr><th>Product</th><th>Pack</th><th class="r">Opening</th><th class="r">Received</th><th class="r">${t('Transfer in')}</th><th class="r">${t('Transfer out')}</th><th class="r">${t('Adjust')}</th><th class="r">Sold</th><th class="r">Closing</th><th class="r">Sales ₹</th></tr>${rows.map(r => `<tr><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td class="r">${r.open}</td><td class="r">${r.inw || ''}</td><td class="r up">${r.tin ? '+' + r.tin : ''}</td><td class="r down">${r.tout ? '−' + r.tout : ''}</td><td class="r">${r.adj ? (r.adj > 0 ? '+' : '') + r.adj : ''}</td><td class="r b">${r.sold || ''}</td><td class="r">${r.close}</td><td class="r">${r.sold ? inr(r.sold * r.p.mrp) : ''}</td></tr>`).join('')}
+  <tr style="background:var(--soft)"><td class="b">Total</td><td></td><td class="r b">${T('open')}</td><td class="r b">${T('inw')}</td><td class="r b">${T('tin')}</td><td class="r b">${T('tout')}</td><td class="r b">${T('adj')}</td><td class="r b">${T('sold')}</td><td class="r b">${T('close')}</td><td class="r b">${inr(sum(rows, r => r.sold * r.p.mrp))}</td></tr></table></div></div>`;
   $('#rd').onchange = e => { SUB.date = e.target.value; SUB.shop = sh; INV.register(); }; if ($('#rsh')) $('#rsh').onchange = e => { SUB.shop = e.target.value; INV.register(); };
-  $('#rcsv').onclick = () => copyText(['Product,Pack,Size,Opening,Received,Sold,Closing', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.open},${r.inw},${r.sold},${r.close}`)].join('\n'));
+  $('#rcsv').onclick = () => copyText(['Product,Pack,Size,Opening,Received,Transfer in,Transfer out,Adjust,Sold,Closing', ...rows.map(r => `"${pname(r.p)}",${r.p.pack},${r.p.sizeMl},${r.open},${r.inw},${r.tin},${r.tout},${r.adj},${r.sold},${r.close}`)].join('\n'));
 };
 INV.links = function () {
-  const rows = Object.entries(S.barcodes || {}).map(([code, pid]) => ({ code, p: prodById(pid) })).filter(r => r.p).sort((a, b) => pname(a.p).localeCompare(pname(b.p)));
+  const rows = Object.entries(S.barcodes || {}).map(([code, pid]) => ({ code, p: prodById(pid), u: (S.bcUnits || {})[code] || 1 })).filter(r => r.p).sort((a, b) => pname(a.p).localeCompare(pname(b.p)));
   $('#inv').innerHTML = `<div class="grid g12"><div class="card"><h3>${ic('scan', 16)} Teach your real barcodes</h3>
    <p class="mute small" style="margin-top:0">Bottles from your depot carry the manufacturer's barcode. Scan each new bottle once here and pick its product. After that, Scan & Sell bills it instantly at every shop.</p>
    <div class="row"><input id="lkin" placeholder="Scan or type barcode ⏎" class="mono" autocomplete="off" inputmode="numeric"><button class="btn p" id="lkcam">${ic('cam')} Camera</button></div>
    <div id="lkmsg"></div></div>
    <div class="card"><h3>Linked barcodes<span class="sp"></span><span class="small mute">${rows.length}</span></h3>
-   <div class="tbl"><table><tr><th>Barcode</th><th>Product</th><th>Pack</th><th></th></tr>${rows.map(r => `<tr><td class="mono small">${esc(r.code)}</td><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td class="r"><button class="btn sm d" data-unl="${esc(r.code)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">No linked barcodes yet — scan a bottle to start</td></tr>'}</table></div></div></div>`;
+   <div class="tbl"><table><tr><th>Barcode</th><th>Product</th><th>Pack</th><th>${t('Type')}</th><th></th></tr>${rows.map(r => `<tr><td class="mono small">${esc(r.code)}</td><td class="small b">${esc(pname(r.p))}</td><td class="small">${ppack(r.p)}</td><td>${r.u > 1 ? `<span class="badge br">${t('Carton')} × ${r.u}</span>` : `<span class="badge">${t('Bottle')}</span>`}</td><td class="r"><button class="btn sm d" data-unl="${esc(r.code)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">No linked barcodes yet — scan a bottle to start</td></tr>'}</table></div></div></div>`;
   const msg = (h, k) => { const m = $('#lkmsg'); if (m) m.innerHTML = `<div class="flash ${k}">${h}</div>`; };
   const handle = code => {
     code = normCode(code); if (!code) return;
@@ -303,9 +354,9 @@ VIEWS.staff = function () {
 const REP = {};
 VIEWS.reports = function () {
   SUB.tab = SUB.tab || 'close';
-  const tabs = [['close', 'Day close'], ['pl', 'Monthly P&L'], ['brands', 'Brand performance'], ['audit', 'Audit trail']];
+  const tabs = [['close', 'Day close'], ['sales', 'Sales report'], ['moves', 'Stock movements'], ['pl', 'Monthly P&L'], ['brands', 'Brand performance'], ['audit', 'Audit trail']];
   $('#view').innerHTML = `<div class="tabs">${tabs.map(([k, t]) => `<a data-t="${k}" class="${SUB.tab === k ? 'on' : ''}">${t}</a>`).join('')}</div><div id="rep"></div>`;
-  $$('[data-t]').forEach(a => a.onclick = () => { SUB = { tab: a.dataset.t }; VIEWS.reports(); });
+  $$('[data-t]').forEach(a => a.onclick = () => { SUB = { tab: a.dataset.t, rk: SUB.rk, rf: SUB.rf, rt: SUB.rt, rs: SUB.rs }; VIEWS.reports(); });
   REP[SUB.tab]();
 };
 REP.close = function () {
@@ -374,18 +425,22 @@ VIEWS.settings = function () {
    <div><label class="f">Tagline</label><input id="bt" value="${esc(t.tagline)}"></div>
    <div class="grid g2"><div><label class="f">Brand colour</label><input id="bc" type="color" value="${t.color}" style="height:42px;padding:4px"></div><div><label class="f">Workspace code (staff type this to sign in)</label><input id="bs" value="${esc(t.slug)}" class="mono" ${API.mode === 'cloud' ? 'disabled title="Fixed after creation because staff logins use it"' : ''}></div></div>
    <div><label class="f">Receipt footer</label><input id="bf" value="${esc(t.footer)}"></div>
+   <div><label class="f">Owner WhatsApp number (reports are sent here)</label><input id="bwa" value="${esc(P.ownerPhone || '')}" inputmode="tel" placeholder="98XXXXXXXX"></div>
    <button class="btn p" id="bsave">Save branding</button></div></div>
   <div class="card"><h3>${ic('lock', 16)} Sale-lock policies</h3>
    ${sw('requireScan', 'Require scan to sell', 'Only barcode or AI-matched products can be billed')}
    ${sw('override', 'Allow manager override', 'Manual add with manager PIN; flagged on the bill')}
    ${sw('mrpLock', 'Lock price at MRP', 'Salesmen cannot change prices')}
    ${sw('stockLock', 'Block sale beyond stock', 'Prevents billing bottles the system says you don\'t have')}
-  <div class="card"><h3>Shops & UPI</h3><div class="tbl" style="border:0"><table><tr><th>Shop</th><th>Code</th><th>Licence</th><th>UPI ID</th></tr>${tShops().map(s => `<tr><td><input data-sh="${s.id}|name" value="${esc(s.name)}"></td><td class="mono small">${s.code}</td><td><input data-sh="${s.id}|license" value="${esc(s.license)}" class="mono"></td><td><input data-sh="${s.id}|upi" value="${esc(s.upi)}" class="mono" placeholder="name@bank"></td></tr>`).join('')}</table></div>
-   <div class="row" style="margin-top:12px"><button class="btn" id="addshop">${ic('plus')} Add shop</button><span class="sp"></span><span class="small mute">Changes save when you leave a field</span></div></div>
+  <div class="card"><h3>Shops & UPI</h3><div class="tbl" style="border:0"><table><tr><th>Main store</th><th>Shop</th><th>Code</th><th>Licence</th><th>UPI ID</th></tr>${tShops().map(s => `<tr><td class="c"><input type="radio" name="mainshop" value="${s.id}" ${s.isMain ? 'checked' : ''} style="width:auto"></td><td><input data-sh="${s.id}|name" value="${esc(s.name)}"></td><td class="mono small">${s.code}</td><td><input data-sh="${s.id}|license" value="${esc(s.license)}" class="mono"></td><td><input data-sh="${s.id}|upi" value="${esc(s.upi)}" class="mono" placeholder="name@bank"></td></tr>`).join('')}</table></div>
+   <div class="row" style="margin-top:12px"><button class="btn" id="addshop">${ic('plus')} Add shop</button><span class="sp"></span><span class="small mute">Changes save when you leave a field · ★ = main store / godown (default source for transfers)</span></div></div>
   <div class="card"><h3>${ic('scan', 16)} Barcode scanner test</h3><p class="mute small" style="margin-top:0">Click the box and scan any bottle. It shows what your USB / Bluetooth scanner sends and whether it is set up correctly.</p><input id="sctest" class="mono" placeholder="Click here, then scan" autocomplete="off"><div id="scout"></div></div>
   <div class="card"><h3>${API.mode === 'demo' ? 'Demo tools' : 'Connection'}</h3>${API.mode === 'demo' ? `<p class="mute" style="margin-top:0">This demo keeps its data in this browser. Reset to regenerate 7 days of realistic sales.</p><div class="row wrap"><button class="btn" id="simt"><span class="dot ${S.sim ? 'live' : ''}"></span> ${S.sim ? 'Stop' : 'Start'} live sales stream</button><button class="btn d" id="reset">Reset demo data</button></div>` : `<p class="mute" style="margin-top:0">Connected to Supabase. Bills, stock and staff are shared live across every device signed in to this workspace.</p><div class="small mono mute">${esc(MX_CONFIG.supabaseUrl)}</div>`}</div></div>`;
   scannerTest($('#sctest'), $('#scout'));
+  $$('[name=mainshop]').forEach(r => r.onchange = async () => { const ok = await run(async () => { await API.setMainShop(r.value); return true; }); if (ok) toast('Main store set', 'ok'); });
   $('#bsave').onclick = async () => {
+    const ph = normPhone($('#bwa').value); if ($('#bwa').value && ph.length !== 10) { toast('Enter a 10-digit mobile number', 'bad'); return; }
+    await API.saveTenant({ pol: { ...pol(), ownerPhone: ph } });
     const patch = { name: $('#bn').value || t.name, logo: ($('#bl').value || t.logo).toUpperCase(), tagline: $('#bt').value, color: $('#bc').value, ...(API.mode === 'cloud' ? {} : { slug: slugify($('#bs').value) || t.slug }), footer: $('#bf').value };
     const ok = await run(async () => { await API.saveTenant(patch); return true; }, $('#bsave')); if (ok) { toast('Branding saved', 'ok'); render(); }
   };

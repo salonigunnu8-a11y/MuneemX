@@ -125,6 +125,15 @@ After any change in `web/`, run `npx cap sync`. Suggested native upgrades for v2
 - **English / हिन्दी**: the **हिं / EN** button in the top bar and on the sign-in page. Translations live in `web/js/i18n.js` (`HI` dictionary + `HI_RX` patterns). Add a line there to translate new text. Product names, shop data and numbers stay as entered.
 - **Light / dark**: the sun/moon button. It follows the phone's setting until changed, and the choice is remembered per device.
 
+## 8a. Cartons, transfers and reports
+
+- **Carton barcodes**: in **Link barcodes** (or the first time an unknown code is scanned on Stock inward / Transfer) choose **A carton / case** and enter the bottles per carton (defaults: Full 12, Half 24, Quarter 48, Pint 12, Can 24). After that one scan of that carton adds the whole carton; a bottle barcode still adds one bottle.
+- **Stock inward**: scan cartons or bottles, edit cartons + loose bottles per line, then **Receive into stock**. Tick **Instant mode** to put each scan straight into stock.
+- **Main store**: Settings → Shops → pick the ★ main store / godown. Transfers start from it by default.
+- **Transfer**: owner (any shop) or a shop's manager (from their own shop) moves cartons/bottles to another shop. Stock leaves the sending shop and lands in the receiving shop in one step, with a `TRF-…` ref, an audit entry, and *Transfer in / Transfer out* columns in the Daily register.
+- **Reports → Sales report**: Today / Yesterday / This week / Last 7 days / This month / Last month / Custom, any shop or all. One-click **PDF**, **Excel** (8 sheets: summary, daily, shops, products, salesmen, every bill, expenses, stock moves), **Print**, and **WhatsApp to owner** (shares the PDF on phones that allow it; otherwise downloads it and opens WhatsApp with the summary to the number in Settings → Owner WhatsApp number).
+- **Reports → Stock movements**: every receipt, transfer and adjustment by date, with a drill-down per ref.
+
 ## 9. How security works
 
 - **Data isolation:** every table has row-level security. A client can only read its own workspace. A salesman sees only his own bills, and a manager only his own shop.
